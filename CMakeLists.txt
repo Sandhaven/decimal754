@@ -5,6 +5,8 @@ set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ./lib)
 set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ./lib)
 
+add_compile_options(-ferror-limit=2)
+
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(MACOSX TRUE)
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
