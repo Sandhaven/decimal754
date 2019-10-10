@@ -1,5 +1,5 @@
 /*
- *  decimal754.h
+ *  decimal.h
  *  C++ implementation of Intel's Decimal Floating-Point Math Library
  *  https://software.intel.com/en-us/articles/intel-decimal-floating-point-math-library
  *
