@@ -1,8 +1,9 @@
 cmake_minimum_required (VERSION 3.1)
+project (decimal754)
+
 set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ./lib)
 set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ./lib)
-project (decimal754)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(MACOSX TRUE)
@@ -12,7 +13,7 @@ elseif (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     set(WINDOWS TRUE)
 endif()
 
-include_directories(./include ./IntelRDFPMathLib20U2/LIBRARY/src)
+include_directories(./include ./IntelRDFPMathLib20U2/src/LIBRARY/src)
 link_directories(./lib)
 
 
@@ -46,25 +47,9 @@ endif()
 add_subdirectory(${CMAKE_CURRENT_BINARY_DIR}/IntelRDFPMathLib20U2 EXCLUDE_FROM_ALL)
 
 
+# === DECIMAL754 === #
+#add_library (decimal754 ./src/decimal.cpp)
+#target_include_directories (decimal754 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-
-
-
-
-
-
-
-## === MARKETS === #
-#add_library (decimal ./src/contract.cpp)
-#target_include_directories (markets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-#
-#add_executable(neon ./src/neon.cpp)
-#target_link_libraries (neon LINK_PUBLIC markets bid)
-#
-#add_executable(test ./tests/test.cpp)
-#target_link_libraries (test LINK_PUBLIC markets bid gtest_main)
-#
-#add_custom_command(TARGET test
-	#POST_BUILD
-	#COMMAND ./gtest-parallel/gtest-parallel ./test || true
-##)
+add_executable(example ./src/example.cpp)
+target_link_libraries (example LINK_PUBLIC bid)

@@ -98,154 +98,127 @@ extern int32_t __bid64_to_int32_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern int64_t __bid64_to_int64_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern int __bid64_quiet_equal (D64 x, D64 y, _IDEC_flags *pfpsf);
 extern int __bid64_signaling_less (D64 x, D64 y, _IDEC_flags *pfpsf);
-//extern _IDEC_flags __bid_testFlags (_IDEC_flags flagsmask, _IDEC_flags *pfpsf);
 }
 
 namespace decimal754 {
+	
+struct DecimalException : public std::runtime_error {
+	_IDEC_flags flags;
+
+	DecimalException(const std::string & message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
+	DecimalException(const char * message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
+
+	const std::string flags_str() {
+		std::string s = "Flags: | ";
+		if ((_IDEC_invalid & this->flags) == _IDEC_invalid) {
+			s += "invalid |";
+		} else if ((_IDEC_zerodivide & this->flags) == _IDEC_invalid) {
+			s += " zerodivide |";
+		} else if ((_IDEC_overflow & this->flags) == _IDEC_overflow) {
+			s += " overflow |";
+		} else if ((_IDEC_underflow & this->flags) == _IDEC_underflow) {
+			s += " underflow |";
+		} else if ((_IDEC_inexact & this->flags) == _IDEC_inexact) {
+			s += " inexact |";
+		}
+
+		return s;
+	}
+};
+
+template <class TResult>
+struct BIDException : public DecimalException {
+	TResult result;
+	BIDException(const std::string & message, _IDEC_flags flags, TResult & result) 
+		: DecimalException(message, flags), result(result) {}
+	
+	BIDException(const char * message, _IDEC_flags flags, TResult & result) 
+		: DecimalException(message, flags), result(result) {}
+};
+
+struct UnsupportedDecimal : public virtual std::runtime_error {
+	UnsupportedDecimal() : std::runtime_error("Unsupported decimal type") {}
+};
 
 class IDecimal {};
 
 template <class T>
 class Decimal : public IDecimal {
 protected:
-	T val; // TODO: DEFAULT TO ZERO
+	T val;
 
 	std::function<T(const uint32_t)> from_uint32;
 	std::function<T(const uint64_t)> from_uint64;
 	std::function<T(char*, _IDEC_round, _IDEC_flags*)> from_string;
-
-public:
-	struct Exception : public virtual std::runtime_error {
-		_IDEC_flags flags;
-		Exception(const std::string & message, _IDEC_flags flags) 
-			: std::runtime_error(message), flags(flags) {}
-		const std::string flags_str() const {
-			std::string s = "Flags: | ";
-			if ((_IDEC_invalid & this->flags) == _IDEC_invalid) {
-				s += "invalid |";
-			} else if ((_IDEC_zerodivide & this->flags) == _IDEC_invalid) {
-				s += " zerodivide |";
-			} else if ((_IDEC_overflow & this->flags) == _IDEC_overflow) {
-				s += " overflow |";
-			} else if ((_IDEC_underflow & this->flags) == _IDEC_underflow) {
-				s += " underflow |";
-			} else if ((_IDEC_inexact & this->flags) == _IDEC_inexact) {
-				s += " inexact |";
-			}
-
-			return s;
-		}
-	};
-
-	struct Unsupported : public virtual std::runtime_error {
-		Unsupported() : std::runtime_error("Unsupported decimal type") {}
-	};
-
-	Decimal() {
-		if constexpr(std::is_same<T, D128>::value) {
-			this->from_uint32 = bid128_from_uint32;
-			this->from_uint64 = bid128_from_uint64;
-			this->from_string = bid128_from_string;
-		} else if constexpr(std::is_same<T, D128>::value) {
-			this->from_uint32 = bid64_from_uint32;
-			this->from_uint64 = bid64_from_uint64;
-			this->from_string = bid64_from_string;
-		} else { throw Unsupported(); }
-
-		this->val = this->from_uint64(0);
-	}
-
-	Decimal(const std::string & value) : Decimal() {
-		auto val = value.empty()? "0" : value;
-		char *cstr = new char[val.length() + 1];
-		strcpy(cstr, val.c_str());
+	std::function<T(int32_t)> from_int32;
+	std::function<T(int64_t)> from_int64;
+	std::function<void(char*, T, _IDEC_flags*)> to_string;
+	std::function<uint8_t(T, _IDEC_flags*)> to_uint8_xrnint;
+	std::function<uint16_t(T, _IDEC_flags*)> to_uint16_xrnint;
+	std::function<uint32_t(T, _IDEC_flags*)> to_uint32_xrnint;
+	std::function<uint64_t(T, _IDEC_flags*)> to_uint64_xrnint;
+	std::function<int8_t(T, _IDEC_flags*)> to_int8_xrnint;
+	std::function<int16_t(T, _IDEC_flags*)> to_int16_xrnint;
+	std::function<int32_t(T, _IDEC_flags*)> to_int32_xrnint;
+	std::function<int64_t(T, _IDEC_flags*)> to_int64_xrnint;
+	std::function<int(T, T, _IDEC_flags*)> quiet_equal;
+	std::function<int(T, T, _IDEC_flags*)> signaling_less;
+	std::function<T(T)> abs;
+	std::function<T(T, T, _IDEC_round, _IDEC_flags*)> mul;
+	
+	template <class TResult>
+	TResult invoke(std::function<TResult(_IDEC_flags*)> func, const char * message) const {
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		this->val = this->from_string(cstr, _IDEC_dflround, &flags);
-		delete[] cstr;
-
+		TResult result = func(&flags);
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to construct decimal from string", flags);
+			throw BIDException<TResult>(message, flags, result);
 		}
+
+		return result;
 	}
 	
-	Decimal(const unsigned char value) : Decimal((unsigned int) value) {}
-	Decimal(const unsigned short value) : Decimal((unsigned int) value) {}
-	Decimal(const unsigned int value) : Decimal() { this->val = this->from_uint32(value); }
-	Decimal(const unsigned long value) : Decimal((unsigned long long) value) {}
-	Decimal(const unsigned long long value) : Decimal() { this->val = this->from_uint64(value); }
-	
-	Decimal(const char value) : Decimal((int) value) {}
-	Decimal(const short value) : Decimal((int) value) {}
-	Decimal(const int value) : Decimal() { this->val = bid128_from_int32(value); }
-	Decimal(const long value) : Decimal((long long) value) {}
-	Decimal(const long long value) : Decimal() { this->val = bid128_from_int64(value); }
-	
+public:	
 	explicit operator unsigned char() const { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_uint8_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to unsigned char", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_uint8_xrnint (this->val, flags);
+		}, "Failed to convert decimal to unsigned char");
 	}
 	
 	explicit operator unsigned short() const { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_uint16_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to unsigned short", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_uint16_xrnint (this->val, flags);
+		}, "Failed to convert decimal to unsigned short");
 	}
 
 	explicit operator unsigned int() const { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_uint32_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to unsigned int", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_uint32_xrnint (this->val, &flags);
+		}, "Failed to convert decimal to unsigned int");
 	}
 	
 	explicit operator unsigned long() const { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned long ans = bid128_to_uint64_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to unsigned long", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_uint64_xrnint (this->val, &flags);
+		}, "Failed to convert decimal to unsigned long");
 	}
 	
 	explicit operator unsigned long long() const { 
-		// TODO - CONSOLIDATE THESE
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned long ans = bid128_to_uint64_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to unsigned long long", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_uint64_xrnint (this->val, &flags);
+		}, "Failed to convert decimal to unsigned long long");
 	}
 	
 	explicit operator char() const { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_int8_xrnint (this->val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to char", flags);
-		}
-
-		return ans;
+		return this->invoke([&](_IDEC_flags * flags) {
+			return this->to_int8_xrnint (this->val, &flags);
+		}, "Failed to convert decimal to char");
 	}
 	
 	explicit operator short() const { 
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_int16_xrnint (this->val, &flags);
+		unsigned int ans = this->to_int16_xrnint (this->val, &flags);
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to short", flags);
+			throw DecimalException("Failed to convert decimal to short", flags);
 		}
 
 		return ans;
@@ -253,9 +226,9 @@ public:
 
 	explicit operator int() const { 
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned int ans = bid128_to_int32_xrnint (this->val, &flags);
+		unsigned int ans = this->to_int32_xrnint (this->val, &flags);
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to int", flags);
+			throw DecimalException("Failed to convert decimal to int", flags);
 		}
 
 		return ans;
@@ -263,9 +236,9 @@ public:
 	
 	explicit operator long() const { 
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned long ans = bid128_to_int64_xrnint (this->val, &flags);
+		unsigned long ans = this->to_int64_xrnint (this->val, &flags);
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to long", flags);
+			throw DecimalException("Failed to convert decimal to long", flags);
 		}
 
 		return ans;
@@ -274,9 +247,9 @@ public:
 	explicit operator long long() const { 
 		// TODO - CONSOLIDATE THESE
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		unsigned long ans = bid128_to_int64_xrnint (this->val, &flags);
+		unsigned long ans = this->to_int64_xrnint (this->val, &flags);
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to long long", flags);
+			throw DecimalException("Failed to convert decimal to long long", flags);
 		}
 
 		return ans;
@@ -286,10 +259,10 @@ public:
 		_IDEC_flags flags = _IDEC_allflagsclear;
 		char buffer[64];
 		buffer[63] = '\0';
-		bid128_to_string (buffer, this->val, &flags);
+		this->to_string (buffer, this->val, &flags);
 		std::string s = buffer;
 		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to int64_t while converting to str: " + s, flags);
+			throw DecimalException("Failed to convert decimal to int64_t while converting to str: " + s, flags);
 		}
 
 		auto len = s.length();
@@ -305,104 +278,149 @@ public:
 		}
 			
 		return s.substr(start, count);
-	
-	/*	
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		int64_t ans = bid128_to_int64_xrnint (this->val, &flags);
-		auto s = std::to_string(ans);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to convert decimal to int64_t while converting to str: " + s, flags);
-		}
-			
-		return s;
-		*/
 	}
 	
 	const bool negative() const {
-		return *this < Decimal(0);
-		//assert(this->value.length() > 0);
-		//return this->value[0] == '-';
-	}
-
-	/*
-	const size_t point() const {
-		auto pos = this->value.find('.');
-		if (pos != std::string::npos) {
-			return pos;
-		} else {
-			return this->value.length();
-		}
-	}
-	*/
-
-	friend Decimal abs(const Decimal & v) {
-		Decimal v2 = v;
-		v2.val = bid128_abs(v.val);
-		return v2;
-		/*
-		if (v.negative()) {
-			return Decimal(v.value.substr(1));
-		} else {
-			return v;
-		}
-		*/
+		return *this < Decimal(0); // TODO: use library
 	}
 	
-	friend bool operator==(const Decimal & l, const Decimal & r) { 
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		auto result = __bid128_quiet_equal (l.val, r.val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to compare decimals for equality", flags);
-		}
-
-		return result > 0;
-	}
-	friend bool operator!=(const Decimal & l, const Decimal & r) { return !(l == r); }
-	friend bool operator<(const Decimal & l, const Decimal & r) {
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		auto result = __bid128_signaling_less (l.val, r.val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw Exception("Failed to order decimals", flags);
-		}
-
-		return result > 0;
-
-		/*
-		return l.val < r.val;
-		if (l.negative() != r.negative()) {
-			return l.negative();
-		} else if (l.negative()) {
-			return abs(r) < abs(l);
-		} else if (l.point() != r.point()) { // TODO: EXPENSIVE
-			return l.point() < r.point();
-		} else {
-			auto llen = l.value.length();
-			auto rlen = r.value.length();
-			auto index = 0;
-			while (index < llen && index < rlen) {
-				if (l.value[index] < r.value[index]) {
-					return true;
-				}
-				++index;
-			}
-
-			return (llen < rlen);
-		}
-		*/
-	}
-	friend bool operator>(const Decimal & l, const Decimal & r) { return r < l || l == r; }
-	friend bool operator<=(const Decimal & l, const Decimal & r) { return l < r || l == r; }
-	friend bool operator>=(const Decimal & l, const Decimal & r) { return l > r || l == r; }
+	friend Decimal abs(const Decimal & v) {
+		Decimal v2 = v;
+		v2.val = T::abs(v.val);
+		return v2;
+	}	
 };
 
 class Decimal128 : public Decimal<D128> {
 public:
-	using Decimal<D128>::Decimal;
+	Decimal128() {
+		this->from_string = bid128_from_string;
+		this->from_uint32 = bid128_from_uint32;
+		this->from_uint64 = bid128_from_uint64;
+		this->from_int32 = bid128_from_int32;
+		this->from_int64 = bid128_from_int64;
+		this->to_string = bid128_to_string;
+		this->to_uint8_xrnint = bid128_to_uint8_xrnint;
+		this->to_uint16_xrnint = bid128_to_uint16_xrnint;
+		this->to_uint32_xrnint = bid128_to_uint32_xrnint;
+		this->to_uint64_xrnint = bid128_to_uint64_xrnint;
+		this->to_int8_xrnint = bid128_to_int8_xrnint;
+		this->to_int16_xrnint = bid128_to_int16_xrnint;
+		this->to_int32_xrnint = bid128_to_int32_xrnint;
+		this->to_int64_xrnint = bid128_to_int64_xrnint;
+		this->quiet_equal = bid128_quiet_equal;
+		this->signaling_less = bid128_signaling_less;
+		this->abs = bid128_abs;
+		this->mul = bid128_mul;
+
+		this->val = this->from_uint64(0);
+	}
+
+	struct cstr {
+		char* val;
+		cstr(std::string & s) {
+			this->val = new char[s.length() + 1];
+			strcpy(this->val, s.c_str());
+		}
+		~cstr() {
+			delete[] this->val;
+		}
+	};
+	
+	Decimal128(const std::string & value) : Decimal128() {
+		auto val = value.empty()? "0" : value;
+		cstr c(val);
+		this->val = this->invoke<D128>([&](_IDEC_flags * flags) {
+			return this->from_string(c.val, _IDEC_dflround, flags);
+		}, "Failed to construct decimal from string");
+	}
+	
+	Decimal128(const unsigned char value) : Decimal128((unsigned int) value) {}
+	Decimal128(const unsigned short value) : Decimal128((unsigned int) value) {}
+	Decimal128(const unsigned int value) : Decimal128() { this->val = this->from_uint32(value); }
+	Decimal128(const unsigned long value) : Decimal128((unsigned long long) value) {}
+	Decimal128(const unsigned long long value) : Decimal128() { this->val = this->from_uint64(value); }
+	
+	Decimal128(const char value) : Decimal128((int) value) {}
+	Decimal128(const short value) : Decimal128((int) value) {}
+	Decimal128(const int value) : Decimal128() { this->val = this->from_int32(value); }
+	Decimal128(const long value) : Decimal128((long long) value) {}
+	Decimal128(const long long value) : Decimal128() { this->val = this->from_int64(value); }
+	
+	friend bool operator!=(const Decimal128 & l, const Decimal128 & r) { return !(l == r); }
+	friend bool operator==(const Decimal128 & l, const Decimal128 & r) { 
+		return (0 < l.invoke<int>([&](_IDEC_flags * flags) {
+			return l.quiet_equal (l.val, r.val, flags);
+		}, "Failed to compare decimals for equality"));
+	}
+
+	friend bool operator>(const Decimal128 & l, const Decimal128 & r) { return r < l || l == r; }
+	friend bool operator<=(const Decimal128 & l, const Decimal128 & r) { return l < r || l == r; }
+	friend bool operator>=(const Decimal128 & l, const Decimal128 & r) { return l > r || l == r; }
+	friend bool operator<(const Decimal128 & l, const Decimal128 & r) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = l.signaling_less (l.val, r.val, &flags);
+		if (flags != _IDEC_allflagsclear) {
+			throw BIDException<int>("Failed to order decimals", flags, result);
+		}
+
+		return result > 0;
+	}
+	
+	void operator*=(const Decimal128 & other) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = this->mul(this->val, other.val, _IDEC_dflround, &flags);
+		if (flags != _IDEC_allflagsclear) {
+			throw DecimalException("Failed to multiply decimals", flags);
+		}
+
+		this->val = result;
+	}
+	
+	friend Decimal128 operator*(const Decimal128 & l, const Decimal128 & r) {
+		Decimal128 tmp = l;
+		tmp *= r;
+		return tmp;
+	}	
+
+	friend std::ostream& operator<<(std::ostream& stream, const Decimal128 & decimal) {
+		stream << decimal.str();
+		return stream;
+	}
 };
 
-class Decimal64 : public Decimal<uint64_t> {
-public:	
-	using Decimal<D64>::Decimal;
+class Decimal64 : public Decimal<D64> {
+public:		
+	Decimal64() : Decimal() {
+		this->from_string = bid64_from_string;
+		this->from_uint32 = bid64_from_uint32;
+		this->from_uint64 = bid64_from_uint64;
+		this->from_int32 = bid64_from_int32;
+		this->from_int64 = bid64_from_int64;
+		this->to_string = bid64_to_string;
+		this->to_uint8_xrnint = bid64_to_uint8_xrnint;
+		this->to_uint16_xrnint = bid64_to_uint16_xrnint;
+		this->to_uint32_xrnint = bid64_to_uint32_xrnint;
+		this->to_uint64_xrnint = bid64_to_uint64_xrnint;
+		this->to_int8_xrnint = bid64_to_int8_xrnint;
+		this->to_int16_xrnint = bid64_to_int16_xrnint;
+		this->to_int32_xrnint = bid64_to_int32_xrnint;
+		this->to_int64_xrnint = bid64_to_int64_xrnint;
+		this->quiet_equal = bid64_quiet_equal;
+		this->signaling_less = bid64_signaling_less;
+	}
+	
+	Decimal64(const std::string & value) : Decimal64() {}
+	Decimal64(const unsigned char value) : Decimal64() {}
+	Decimal64(const unsigned short value) : Decimal64() {}
+	Decimal64(const unsigned int value) : Decimal64() {}
+	Decimal64(const unsigned long value) : Decimal64() {}
+	Decimal64(const unsigned long long value) : Decimal64() {}
+	Decimal64(const char value) : Decimal64() {}
+	Decimal64(const short value) : Decimal64() {}
+	Decimal64(const int value) : Decimal64() {}
+	Decimal64(const long value) : Decimal64() {}
+	Decimal64(const long long value) : Decimal64() {}
 };
 
 class DecimalFactory {
@@ -454,7 +472,8 @@ public:
 		std::cout << "Random number: " << result << std::endl;
 
 		// use the string to create a decimal
-		return Decimal128(result);
+		return Decimal128(); // TODO:
+		//return Decimal128(result);
 
    /* 
 		The maximum number of decimal digits in the significand of numerical
@@ -478,6 +497,6 @@ public:
 	}
 };
 	
-} // namespace decimal754
+} // namespace markets
 
 #endif // DECIMAL_H

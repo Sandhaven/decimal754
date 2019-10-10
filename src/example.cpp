@@ -9,6 +9,6 @@ int main(int argc, char ** argv) {
 	Decimal128 b("3");
 	Decimal128 c = a * b;
 
-	cout << a << " * " << b << " = " c << endl;
+	cout << a << " * " << b << " = " << c << endl;
 	return 0;
 }
