@@ -113,17 +113,6 @@ extern int __bid64_quiet_less (D64 x, D64 y, _IDEC_flags *pfpsf);
 
 namespace decimal754 {
 	
-struct DecimalException : public std::runtime_error {
-	_IDEC_flags flags;
-
-	DecimalException(const std::string & message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
-	DecimalException(const char * message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
-};
-
-struct UnsupportedDecimal : public virtual std::runtime_error {
-	UnsupportedDecimal() : std::runtime_error("Unsupported decimal type") {}
-};
-
 template <class T>
 class Decimal {
 protected:
@@ -139,10 +128,10 @@ protected:
 	};
 	
 	unsigned int errors = Error::None;
-	
+			
 	void check_flags(const _IDEC_flags flags) const {
 		if ((flags & Error::Invalid) == Error::Invalid) {
-			throw DecimalException("Invalid decimal operation", flags);
+			throw Decimal::Exception("Invalid decimal operation", flags);
 		}
 	}
 
@@ -203,6 +192,45 @@ protected:
 	};
 	
 public:	 
+	struct Exception : public std::runtime_error {
+		_IDEC_flags flags;
+
+		Exception(const std::string & message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
+		Exception(const char * message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
+		
+	};
+
+	const unsigned int Errors() const { return this->errors; }
+
+	static const std::string error_str(const unsigned int flags) {
+		std::stringstream ss;
+		std::vector<std::string> v;
+
+		if ((flags & Error::Invalid) == Error::Invalid) {
+			v.push_back("invalid");
+		} else if ((flags & Error::DivideByZero) == DivideByZero) {
+			v.push_back("zerodivide");
+		} else if ((flags & Error::Overflow) == Error::Overflow) {
+			v.push_back("overflow");
+		} else if ((flags & Error::Underflow) == Error::Underflow) {
+			v.push_back("underflow");
+		} else if ((flags & Error::Inexact) == Error::Inexact) {
+			v.push_back("inexact");
+		}
+
+		if (v.size() > 0) {
+			for(size_t i = 0; i < v.size(); ++i) {
+				if (i != 0)
+					ss << ", ";
+				ss << v[i];
+			}
+		} else {
+			ss << "None";
+		}
+			
+		return ss.str();
+	}
+
 	const std::string str() const {
 		char buffer[64];
 		buffer[63] = '\0';
@@ -226,36 +254,6 @@ public:
 		}
 			
 		return s.substr(start, count);
-	}
-
-	const std::string error_str() const {
-		std::stringstream ss;
-		std::vector<std::string> v;
-
-		if ((this->errors & Error::Invalid) == Error::Invalid) {
-			v.push_back("invalid");
-		} else if ((this->errors & Error::DivideByZero) == DivideByZero) {
-			v.push_back("zerodivide");
-		} else if ((this->errors & Error::Overflow) == Error::Overflow) {
-			v.push_back("overflow");
-		} else if ((this->errors & Error::Underflow) == Error::Underflow) {
-			v.push_back("underflow");
-		} else if ((this->errors & Error::Inexact) == Error::Inexact) {
-			v.push_back("inexact");
-		}
-
-		if (v.size() > 0) {
-			ss << "| ";
-			for(size_t i = 0; i < v.size(); ++i) {
-				ss << v[i];
-				if (i < v.size() - 1) {
-					ss << " | ";
-				}
-			}
-			ss << " |";
-		}
-			
-		return ss.str();
 	}
 	
 	const bool negative() const {
@@ -345,13 +343,7 @@ public:
 			return this->div(this->val, other.val, _IDEC_dflround, flags);
 		});
 	}
-
-	friend inline Decimal abs(const Decimal & v) {
-		Decimal<T> v2 = v;
-		v2.val = v.abs(v2.val);
-		return v2;
-	}	
-		
+	
 	friend inline bool operator!=(const Decimal & l, const Decimal & r) { return !(l == r); }
 	friend inline bool operator==(const Decimal & l, const Decimal & r) { 
 		_IDEC_flags flags = _IDEC_allflagsclear;
@@ -367,7 +359,7 @@ public:
 		auto result = l.quiet_less (l.val, r.val, &flags);
 		return result > 0;
 	}
-	
+		
 	friend inline std::ostream& operator<<(std::ostream& stream, const Decimal & decimal) {
 		stream << decimal.str();
 		return stream;
@@ -423,6 +415,12 @@ public:
 	Decimal128(const int value) : Decimal128() { this->val = this->from_int32(value); }
 	Decimal128(const long value) : Decimal128((long long) value) {}
 	Decimal128(const long long value) : Decimal128() { this->val = this->from_int64(value); }			
+	
+	friend inline Decimal128 abs(const Decimal128 & v) {
+		Decimal128 v2 = v;
+		v2.val = v.abs(v2.val);
+		return v2;
+	}	
 	
 	friend inline Decimal128 operator-(const Decimal128 & v) {
 		Decimal128 v2 = v;
