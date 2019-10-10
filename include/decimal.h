@@ -30,6 +30,7 @@
 #define DECIMAL_H
 
 #include <random>
+#include <sstream>
 
 extern "C" {
 #include <bid_conf.h>
@@ -66,7 +67,10 @@ extern D128 __bid128_from_uint64 (uint64_t);
 extern D128 __bid128_from_int32 (int32_t);
 extern D128 __bid128_from_int64 (int64_t);
 extern D128 __bid128_abs (D128 x);
+extern D128 __bid128_add ( D128, D128, _IDEC_round, _IDEC_flags *);
+extern D128 __bid128_sub ( D128, D128, _IDEC_round, _IDEC_flags *);
 extern D128 __bid128_mul ( D128, D128, _IDEC_round, _IDEC_flags *);
+extern D128 __bid128_div ( D128, D128, _IDEC_round, _IDEC_flags *);
 extern void __bid128_to_string ( char *ps, D128 x, _IDEC_flags *pfpsf);
 extern uint8_t __bid128_to_uint8_xrnint (D128 x, _IDEC_flags *pfpsf);
 extern uint16_t __bid128_to_uint16_xrnint (D128 x, _IDEC_flags *pfpsf);
@@ -77,7 +81,7 @@ extern int16_t __bid128_to_int16_xrnint (D128 x, _IDEC_flags *pfpsf);
 extern int32_t __bid128_to_int32_xrnint (D128 x, _IDEC_flags *pfpsf);
 extern int64_t __bid128_to_int64_xrnint (D128 x, _IDEC_flags *pfpsf);
 extern int __bid128_quiet_equal (D128 x, D128 y, _IDEC_flags *pfpsf);
-extern int __bid128_signaling_less (D128 x, D128 y, _IDEC_flags *pfpsf);
+extern int __bid128_quiet_less (D128 x, D128 y, _IDEC_flags *pfpsf); // TODO: SIGNALLING?
 
 /* 64-bit functions */
 extern D64 __bid64_from_string (char *ps, _IDEC_round rnd_mode, _IDEC_flags *pfpsf);
@@ -86,7 +90,10 @@ extern D64 __bid64_from_uint64 (uint64_t);
 extern D64 __bid64_from_int32 (int32_t);
 extern D64 __bid64_from_int64 (int64_t);
 extern D64 __bid64_abs (D64 x);
+extern D64 __bid64_add ( D64, D64, _IDEC_round, _IDEC_flags *);
+extern D64 __bid64_sub ( D64, D64, _IDEC_round, _IDEC_flags *);
 extern D64 __bid64_mul ( D64, D64, _IDEC_round, _IDEC_flags *);
+extern D64 __bid64_div ( D64, D64, _IDEC_round, _IDEC_flags *);
 extern void __bid64_to_string ( char *ps, D64 x, _IDEC_flags *pfpsf);
 extern uint8_t __bid64_to_uint8_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern uint16_t __bid64_to_uint16_xrnint (D64 x, _IDEC_flags *pfpsf);
@@ -97,7 +104,7 @@ extern int16_t __bid64_to_int16_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern int32_t __bid64_to_int32_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern int64_t __bid64_to_int64_xrnint (D64 x, _IDEC_flags *pfpsf);
 extern int __bid64_quiet_equal (D64 x, D64 y, _IDEC_flags *pfpsf);
-extern int __bid64_signaling_less (D64 x, D64 y, _IDEC_flags *pfpsf);
+extern int __bid64_quiet_less (D64 x, D64 y, _IDEC_flags *pfpsf);
 }
 
 namespace decimal754 {
@@ -107,33 +114,6 @@ struct DecimalException : public std::runtime_error {
 
 	DecimalException(const std::string & message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
 	DecimalException(const char * message, _IDEC_flags flags) : std::runtime_error(message), flags(flags) {}
-
-	const std::string flags_str() {
-		std::string s = "Flags: | ";
-		if ((_IDEC_invalid & this->flags) == _IDEC_invalid) {
-			s += "invalid |";
-		} else if ((_IDEC_zerodivide & this->flags) == _IDEC_invalid) {
-			s += " zerodivide |";
-		} else if ((_IDEC_overflow & this->flags) == _IDEC_overflow) {
-			s += " overflow |";
-		} else if ((_IDEC_underflow & this->flags) == _IDEC_underflow) {
-			s += " underflow |";
-		} else if ((_IDEC_inexact & this->flags) == _IDEC_inexact) {
-			s += " inexact |";
-		}
-
-		return s;
-	}
-};
-
-template <class TResult>
-struct BIDException : public DecimalException {
-	TResult result;
-	BIDException(const std::string & message, _IDEC_flags flags, TResult & result) 
-		: DecimalException(message, flags), result(result) {}
-	
-	BIDException(const char * message, _IDEC_flags flags, TResult & result) 
-		: DecimalException(message, flags), result(result) {}
 };
 
 struct UnsupportedDecimal : public virtual std::runtime_error {
@@ -146,6 +126,24 @@ template <class T>
 class Decimal : public IDecimal {
 protected:
 	T val;
+
+	enum Error: unsigned int {
+		None			= 0x00,
+		Invalid			= 0x01,
+		DivideByZero	= 0x04,
+		Overflow		= 0x08,
+		Underflow		= 0x10,
+		Inexact			= 0x20
+	};
+	
+	unsigned int errors = Error::None;
+	
+	void check_flags(const _IDEC_flags flags) {
+		this->errors |= flags;
+		if ((flags & Error::Invalid) == Error::Invalid) {
+			throw DecimalException("Invalid decimal operation", flags);
+		}
+	}
 
 	std::function<T(const uint32_t)> from_uint32;
 	std::function<T(const uint64_t)> from_uint64;
@@ -162,56 +160,86 @@ protected:
 	std::function<int32_t(T, _IDEC_flags*)> to_int32_xrnint;
 	std::function<int64_t(T, _IDEC_flags*)> to_int64_xrnint;
 	std::function<int(T, T, _IDEC_flags*)> quiet_equal;
-	std::function<int(T, T, _IDEC_flags*)> signaling_less;
+	std::function<int(T, T, _IDEC_flags*)> quiet_less;
 	std::function<T(T)> abs;
+	std::function<T(T, T, _IDEC_round, _IDEC_flags*)> add;
+	std::function<T(T, T, _IDEC_round, _IDEC_flags*)> sub;
 	std::function<T(T, T, _IDEC_round, _IDEC_flags*)> mul;
+	std::function<T(T, T, _IDEC_round, _IDEC_flags*)> div;
 	
 	template <class TResult>
-	TResult invoke(std::function<TResult(_IDEC_flags*)> func, const char * message) const {
+	TResult invoke(std::function<TResult(_IDEC_flags*)> func) {
 		_IDEC_flags flags = _IDEC_allflagsclear;
 		TResult result = func(&flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw BIDException<TResult>(message, flags, result);
-		}
-
+		check_flags(flags);
 		return result;
 	}
 	
-public:	
+public:	 
+	const std::string error_str() const {
+		std::stringstream ss;
+		std::vector<std::string> v;
+
+		if ((this->errors & Error::Invalid) == Error::Invalid) {
+			v.push_back("invalid");
+		} else if ((this->errors & Error::DivideByZero) == DivideByZero) {
+			v.push_back("zerodivide");
+		} else if ((this->errors & Error::Overflow) == Error::Overflow) {
+			v.push_back("overflow");
+		} else if ((this->errors & Error::Underflow) == Error::Underflow) {
+			v.push_back("underflow");
+		} else if ((this->errors & Error::Inexact) == Error::Inexact) {
+			v.push_back("inexact");
+		}
+
+		if (v.size() > 0) {
+			ss << "| ";
+			for(size_t i = 0; i < v.size(); ++i) {
+				ss << v[i];
+				if (i < v.size() - 1) {
+					ss << " | ";
+				}
+			}
+			ss << " |";
+		}
+			
+		return ss.str();
+	}
+
 	explicit operator unsigned char() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_uint8_xrnint (this->val, flags);
-		}, "Failed to convert decimal to unsigned char");
+		});
 	}
 	
 	explicit operator unsigned short() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_uint16_xrnint (this->val, flags);
-		}, "Failed to convert decimal to unsigned short");
+		});
 	}
 
 	explicit operator unsigned int() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_uint32_xrnint (this->val, &flags);
-		}, "Failed to convert decimal to unsigned int");
+		});
 	}
 	
 	explicit operator unsigned long() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_uint64_xrnint (this->val, &flags);
-		}, "Failed to convert decimal to unsigned long");
+		});
 	}
 	
 	explicit operator unsigned long long() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_uint64_xrnint (this->val, &flags);
-		}, "Failed to convert decimal to unsigned long long");
+		});
 	}
 	
 	explicit operator char() const { 
 		return this->invoke([&](_IDEC_flags * flags) {
 			return this->to_int8_xrnint (this->val, &flags);
-		}, "Failed to convert decimal to char");
+		});
 	}
 	
 	explicit operator short() const { 
@@ -289,6 +317,40 @@ public:
 		v2.val = T::abs(v.val);
 		return v2;
 	}	
+	
+	void operator+=(const Decimal<T> & other) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = this->add(this->val, other.val, _IDEC_dflround, &flags);
+		if (flags != _IDEC_allflagsclear) {
+			throw DecimalException("Failed to add decimals", flags);
+		}
+
+		this->val = result;
+	}
+	
+	void operator-=(const Decimal<T> & other) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = this->sub(this->val, other.val, _IDEC_dflround, &flags);
+		if (flags != _IDEC_allflagsclear) {
+			throw DecimalException("Failed to subtract decimals", flags);
+		}
+
+		this->val = result;
+	}
+	
+	void operator*=(const Decimal<T> & other) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = this->mul(this->val, other.val, _IDEC_dflround, &flags);
+		check_flags(flags);
+		this->val = result;
+	}
+	
+	void operator/=(const Decimal<T> & other) {
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = this->div(this->val, other.val, _IDEC_dflround, &flags);
+		check_flags(flags);
+		this->val = result;
+	}
 };
 
 class Decimal128 : public Decimal<D128> {
@@ -309,9 +371,12 @@ public:
 		this->to_int32_xrnint = bid128_to_int32_xrnint;
 		this->to_int64_xrnint = bid128_to_int64_xrnint;
 		this->quiet_equal = bid128_quiet_equal;
-		this->signaling_less = bid128_signaling_less;
+		this->quiet_less = bid128_quiet_less;
 		this->abs = bid128_abs;
+		this->add = bid128_add;
+		this->sub = bid128_sub;
 		this->mul = bid128_mul;
+		this->div = bid128_div;
 
 		this->val = this->from_uint64(0);
 	}
@@ -332,7 +397,7 @@ public:
 		cstr c(val);
 		this->val = this->invoke<D128>([&](_IDEC_flags * flags) {
 			return this->from_string(c.val, _IDEC_dflround, flags);
-		}, "Failed to construct decimal from string");
+		});
 	}
 	
 	Decimal128(const unsigned char value) : Decimal128((unsigned int) value) {}
@@ -349,9 +414,9 @@ public:
 	
 	friend bool operator!=(const Decimal128 & l, const Decimal128 & r) { return !(l == r); }
 	friend bool operator==(const Decimal128 & l, const Decimal128 & r) { 
-		return (0 < l.invoke<int>([&](_IDEC_flags * flags) {
-			return l.quiet_equal (l.val, r.val, flags);
-		}, "Failed to compare decimals for equality"));
+		_IDEC_flags flags = _IDEC_allflagsclear;
+		auto result = l.quiet_equal (l.val, r.val, &flags);
+		return result > 0;
 	}
 
 	friend bool operator>(const Decimal128 & l, const Decimal128 & r) { return r < l || l == r; }
@@ -359,27 +424,31 @@ public:
 	friend bool operator>=(const Decimal128 & l, const Decimal128 & r) { return l > r || l == r; }
 	friend bool operator<(const Decimal128 & l, const Decimal128 & r) {
 		_IDEC_flags flags = _IDEC_allflagsclear;
-		auto result = l.signaling_less (l.val, r.val, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw BIDException<int>("Failed to order decimals", flags, result);
-		}
-
+		auto result = l.quiet_less (l.val, r.val, &flags);
 		return result > 0;
 	}
 	
-	void operator*=(const Decimal128 & other) {
-		_IDEC_flags flags = _IDEC_allflagsclear;
-		auto result = this->mul(this->val, other.val, _IDEC_dflround, &flags);
-		if (flags != _IDEC_allflagsclear) {
-			throw DecimalException("Failed to multiply decimals", flags);
-		}
-
-		this->val = result;
-	}
+	friend Decimal128 operator+(const Decimal128 & l, const Decimal128 & r) {
+		Decimal128 tmp = l;
+		tmp += r;
+		return tmp;
+	}	
+	
+	friend Decimal128 operator-(const Decimal128 & l, const Decimal128 & r) {
+		Decimal128 tmp = l;
+		tmp -= r;
+		return tmp;
+	}	
 	
 	friend Decimal128 operator*(const Decimal128 & l, const Decimal128 & r) {
 		Decimal128 tmp = l;
 		tmp *= r;
+		return tmp;
+	}	
+	
+	friend Decimal128 operator/(const Decimal128 & l, const Decimal128 & r) {
+		Decimal128 tmp = l;
+		tmp /= r;
 		return tmp;
 	}	
 
@@ -407,7 +476,7 @@ public:
 		this->to_int32_xrnint = bid64_to_int32_xrnint;
 		this->to_int64_xrnint = bid64_to_int64_xrnint;
 		this->quiet_equal = bid64_quiet_equal;
-		this->signaling_less = bid64_signaling_less;
+		this->quiet_less = bid64_quiet_less;
 	}
 	
 	Decimal64(const std::string & value) : Decimal64() {}
