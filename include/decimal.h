@@ -98,10 +98,9 @@ extern int __bid64_quiet_less (D64 x, D64 y, ErrorFlags *pfpsf);
 // Base class for decimal types
 template <class T>
 class Decimal {
-protected:
-	T val; // either D64 or D128
-
-	// Rounding modes
+public:
+	// rounding modes
+	// NearestEven apparently means half-even
 	enum Round: unsigned int{
 		NearestEven = 0,	// 3.1415 -> 3.142,		2.71828182845 -> 2.7182818284
 		Downward    = 1,	// -3.1415 -> -3.142	3.1415 -> 3.141
@@ -109,9 +108,7 @@ protected:
 		TowardZero  = 3,	// -3.1415 -> -3.141	3.1415 -> 3.141
 		NearestAway = 4		// 3.1415 -> 3.142,		2.71828182845 -> 2.7182818285
 	};
-
-	RoundMode round_mode = Round::NearestEven;
-
+	
 	enum Error: unsigned int {
 		None			= 0x00,
 		Invalid			= 0x01,
@@ -120,20 +117,32 @@ protected:
 		Underflow		= 0x10,
 		Inexact			= 0x20
 	};
-	
+
+protected:
+	T val; // either D64 or D128
+
+	RoundMode round_mode = Round::NearestEven;
 	ErrorFlags errors = Error::None;
-			
-	void check_flags(const ErrorFlags flags) const {
+		
+	// throws an exception if an invalid operation occurred	
+	// TODO: Let the user specify additional exceptions (overflow, underflow, etc.)
+	void check_flags(const ErrorFlags flags) const { 
 		if ((flags & Error::Invalid) == Error::Invalid) {
-			throw Decimal::Exception("Invalid decimal operation", flags);
+			throw Decimal::Exception("Invalid decimal operation", flags, *this);
 		}
 	}
 
+	// saves the flags so they can be read later,
+	// and checks them for invalid operations
 	void save_flags(const ErrorFlags flags) {
 		this->errors |= flags;
 		this->check_flags(flags);
 	}
 
+	// functions used for conducting operations.
+	// since different functions are needed 
+	// depending on the data type of T,
+	// we have to attach these when the object is constructed
 	std::function<T(const uint32_t)> from_uint32;
 	std::function<T(const uint64_t)> from_uint64;
 	std::function<T(char*, RoundMode, ErrorFlags*)> from_string;
@@ -158,14 +167,28 @@ protected:
 	std::function<T(T, T, RoundMode, ErrorFlags*)> mul;
 	std::function<T(T, T, RoundMode, ErrorFlags*)> div;
 	
-	template <class TResult>
-	TResult invoke(std::function<TResult(ErrorFlags*)> func) {
+	// helper method to invoke an operation
+	// this method does not save any flags
+	// (it does not modify the object)	
+	void invoke(std::function<void(ErrorFlags*)> func) const {
 		ErrorFlags flags = Error::None;
-		TResult result = func(&flags);
-		this->save_flags(flags);
-		return result;
+		func(&flags);
+		check_flags(flags);
 	}
 	
+	// helper method to invoke an operation
+	// this method does not save any flags
+	// (it does not modify the object)	
+	void invoke(std::function<void(ErrorFlags*)> func) {
+		ErrorFlags flags = Error::None;
+		func(&flags);
+		save_flags(flags);
+	}
+
+	// helper method to invoke an operation
+	// this method does not save any flags
+	// (it does not modify the object)	
+	// this method returns the result of the operation
 	template <class TResult>
 	TResult invoke(std::function<TResult(ErrorFlags*)> func) const {
 		ErrorFlags flags = Error::None;
@@ -174,6 +197,18 @@ protected:
 		return result;
 	}
 	
+	// helper method to invoke an operation
+	// this method saves any flags that the operation sets
+	// this method returns the result of the operation
+	template <class TResult>
+	TResult invoke(std::function<TResult(ErrorFlags*)> func) {
+		ErrorFlags flags = Error::None;
+		TResult result = func(&flags);
+		this->save_flags(flags);
+		return result;
+	}
+
+	// encapsulates construction / destruction of a char*
 	struct cstr {
 		char* val;
 		cstr(std::string & s) {
@@ -185,19 +220,24 @@ protected:
 		}
 	};
 
+	// used by derived classes to set the rounding mode
 	Decimal(const RoundMode & round_mode = Round::NearestEven) : round_mode(round_mode) {}
 	
 public:	 
 	struct Exception : public std::runtime_error {
-		ErrorFlags flags;
+		const ErrorFlags flags;
+		const Decimal decimal;
 
-		Exception(const std::string & message, ErrorFlags flags) : std::runtime_error(message), flags(flags) {}
-		Exception(const char * message, ErrorFlags flags) : std::runtime_error(message), flags(flags) {}
+		Exception(const std::string & message, ErrorFlags flags, const Decimal & decimal) 
+			: std::runtime_error(message), flags(flags), decimal(decimal) {}
+		Exception(const char * message, ErrorFlags flags, const Decimal & decimal) 
+			: std::runtime_error(message), flags(flags), decimal(decimal) {}
 		
 	};
 
 	const unsigned int Errors() const { return this->errors; }
 
+	// combines the given error flags to produce a comma-separated list
 	static const std::string error_str(const unsigned int flags) {
 		std::stringstream ss;
 		std::vector<std::string> v;
@@ -227,16 +267,17 @@ public:
 		return ss.str();
 	}
 
+	// converts the decimal to a string
+	// TODO: Inexact strings are ugly
 	const std::string str() const {
-		char buffer[64];
-		buffer[63] = '\0';
+		char buffer[42];
+		buffer[41] = '\0';
 		
-		ErrorFlags flags = Error::None;
-		this->to_string (buffer, this->val, &flags);
-		check_flags(flags);
+		this->invoke([&](ErrorFlags * flags) {
+			this->to_string (buffer, this->val, flags);
+		});
 
 		std::string s = buffer;
-
 		auto len = s.length();
 		auto start = 0;
 		auto count = len;
@@ -251,11 +292,13 @@ public:
 			
 		return s.substr(start, count);
 	}
-	
-	const bool negative() const {
+
+	// true if this decimal < 0	
+	const bool is_negative() const {
 		return (this->is_signed(this->val) > 0);
 	}
 
+	// == operators to convert to native types == //
 	explicit operator unsigned char() const { 
 		return this->invoke<unsigned char>([&](ErrorFlags * flags) {
 			return this->to_uint8_xrnint (this->val, flags);
@@ -315,7 +358,8 @@ public:
 			return this->to_int64_xrnint (this->val, flags);
 		});
 	}
-	
+
+	// == arithmetic operators == //	
 	void inline operator+=(const Decimal<T> & other) {
 		// TODO: WHAT IF ROUND MODES DON'T MATCH?
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
@@ -340,12 +384,18 @@ public:
 			return this->div(this->val, other.val, this->round_mode, flags);
 		});
 	}
-	
+
+	// == comparison operators == //	
 	friend inline bool operator!=(const Decimal & l, const Decimal & r) { return !(l == r); }
 	friend inline bool operator==(const Decimal & l, const Decimal & r) { 
 		ErrorFlags flags = Error::None;
 		auto result = l.quiet_equal (l.val, r.val, &flags);
 		return result > 0;
+	
+
+		//return (l.invoke<int>([&](ErrorFlags * flags) {
+			//return l.quiet_equal(l.val, r.val, flags);
+		//}) > 0);
 	}
 
 	friend inline bool operator>(const Decimal & l, const Decimal & r) { return r < l || l == r; }
@@ -363,9 +413,10 @@ public:
 	}
 };
 
+
 class Decimal128 : public Decimal<D128> {
 public:
-	Decimal128() : Decimal128(static_cast<int>(0)) { attach_bid_functions(); }
+	Decimal128() : Decimal128(static_cast<int>(0)) {}
 	
 	Decimal128(const unsigned char value, const RoundMode round_mode = Round::NearestEven) 
 		: Decimal128((unsigned int) value, round_mode) {}
@@ -388,11 +439,13 @@ public:
 	Decimal128(const short value, const RoundMode round_mode = Round::NearestEven) : Decimal128((int) value, round_mode) {}
 	Decimal128(const int value, const RoundMode round_mode = Round::NearestEven) : Decimal(round_mode) {
 		this->attach_bid_functions();
+		this->val = this->from_int32(value); 
 	}
 	Decimal128(const long value, const RoundMode round_mode = Round::NearestEven) : Decimal128((long long) value, round_mode) {}
 	Decimal128(const long long value, const RoundMode round_mode = Round::NearestEven) : Decimal128(round_mode) { 
 		this->attach_bid_functions();
-		this->val = this->from_int64(value); }			
+		this->val = this->from_int64(value); 
+	}			
 	
 	Decimal128(const std::string & value, const RoundMode round_mode = Round::NearestEven) 
 		: Decimal(round_mode) {

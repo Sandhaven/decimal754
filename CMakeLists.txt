@@ -53,5 +53,5 @@ add_subdirectory(${CMAKE_CURRENT_BINARY_DIR}/IntelRDFPMathLib20U2 EXCLUDE_FROM_A
 #add_library (decimal754 ./src/decimal.cpp)
 #target_include_directories (decimal754 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(test ./src/test.cpp)
+add_executable(test ./src/main.cpp ./src/tests.cpp)
 target_link_libraries (test LINK_PUBLIC bid)
