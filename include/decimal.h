@@ -115,28 +115,50 @@ public:
 		DivideByZero	= 0x04,
 		Overflow		= 0x08,
 		Underflow		= 0x10,
-		Inexact			= 0x20
+		Inexact			= 0x20,
+		Any				= 0xFF
 	};
 
 protected:
 	T val; // either D64 or D128
 
-	RoundMode round_mode = Round::NearestEven;
-	ErrorFlags errors = Error::None;
-		
+	RoundMode _round_mode = Round::NearestEven;
+	ErrorFlags _errors = Error::None;
+	ErrorFlags _throw = Error::None;
+	
 	// throws an exception if an invalid operation occurred	
-	// TODO: Let the user specify additional exceptions (overflow, underflow, etc.)
 	void check_flags(const ErrorFlags flags) const { 
 		if ((flags & Error::Invalid) == Error::Invalid) {
-			throw Decimal::Exception("Invalid decimal operation", flags, *this);
+			throw Decimal::InvalidException("Invalid decimal operation", flags, *this);
+		} else if ((flags & Error::DivideByZero) == Error::DivideByZero && 
+			(this->_throw & Error::DivideByZero) == Error::DivideByZero) {
+			throw Decimal::DivideByZeroException("Attempt to divide by zero", flags, *this);
+		} else if ((flags & Error::Overflow) == Error::Overflow && 
+			(this->_throw & Error::Overflow) == Error::Overflow) {
+			throw Decimal::OverflowException("Overflow", flags, *this);
+		} else if ((flags & Error::Underflow) == Error::Underflow && 
+			(this->_throw & Error::Underflow) == Error::Underflow) {
+			throw Decimal::UnderflowException("Underflow", flags, *this);
+		} else if ((flags & Error::Inexact) == Error::Inexact && 
+			(this->_throw & Error::Inexact) == Error::Inexact) {
+			throw Decimal::InexactException("Inexact", flags, *this);
 		}
 	}
 
 	// saves the flags so they can be read later,
 	// and checks them for invalid operations
 	void save_flags(const ErrorFlags flags) {
-		this->errors |= flags;
+		this->_errors |= flags;
 		this->check_flags(flags);
+	}
+
+	// throws an exception if an operation involves 
+	// multiple values, but their respective rounding modes
+	// are not the same
+	void check_rounding(const RoundMode against) {
+		if (this->_round_mode != against) {
+			throw MismatchedRoundingException(this->_round_mode, against);
+		}
 	}
 
 	// functions used for conducting operations.
@@ -221,7 +243,7 @@ protected:
 	};
 
 	// used by derived classes to set the rounding mode
-	Decimal(const RoundMode & round_mode = Round::NearestEven) : round_mode(round_mode) {}
+	Decimal(const RoundMode & round_mode = Round::NearestEven) : _round_mode(round_mode) {}
 	
 public:	 
 	struct Exception : public std::runtime_error {
@@ -232,10 +254,33 @@ public:
 			: std::runtime_error(message), flags(flags), decimal(decimal) {}
 		Exception(const char * message, ErrorFlags flags, const Decimal & decimal) 
 			: std::runtime_error(message), flags(flags), decimal(decimal) {}
-		
 	};
+	
+	struct InvalidException : public Exception { using Exception::Exception; };
+	struct DivideByZeroException : public Exception { using Exception::Exception; };
+	struct OverflowException : public Exception { using Exception::Exception; };
+	struct UnderflowException : public Exception { using Exception::Exception; };
+	struct InexactException : public Exception { using Exception::Exception; };
+	struct MismatchedRoundingException : public std::runtime_error { 
+		const RoundMode mode1;
+		const RoundMode mode2;
+		MismatchedRoundingException(const RoundMode mode1, const RoundMode mode2) :
+			std::runtime_error("Mismatched rounding modes"), mode1(mode1), mode2(mode2) {}
+   	};
+	
+	void throw_on(const Error & error) { this->_throw |= error; }
+	void throw_off(const Error & error) { this->_throw ^= error; }
 
-	const unsigned int Errors() const { return this->errors; }
+	const unsigned int errors() const { return this->_errors; }
+	const bool divide_by_zero() const { return ((this->_errors & Error::DivideByZero) == Error::DivideByZero); }
+	const bool overflow() const { return ((this->_errors & Error::Overflow)== Error::Overflow); }
+	const bool underflow() const { return ((this->_errors & Error::Underflow) == Error::Underflow); }
+	const bool inexact() const { return ((this->_errors & Error::Inexact) == Error::Inexact); }
+
+	// TODO: ADDITIONAL PROPERTIES
+	// SUBNORMAL
+	// PRECISION
+	// EMAX / EMIN
 
 	// combines the given error flags to produce a comma-separated list
 	static const std::string error_str(const unsigned int flags) {
@@ -361,27 +406,30 @@ public:
 
 	// == arithmetic operators == //	
 	void inline operator+=(const Decimal<T> & other) {
-		// TODO: WHAT IF ROUND MODES DON'T MATCH?
+		check_rounding(other._round_mode);
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->add(this->val, other.val, this->round_mode, flags);
+			return this->add(this->val, other.val, this->_round_mode, flags);
 		});
 	}
 	
 	void inline operator-=(const Decimal<T> & other) {
+		check_rounding(other._round_mode);
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->sub(this->val, other.val, this->round_mode, flags);
+			return this->sub(this->val, other.val, this->_round_mode, flags);
 		});
 	}
 	
 	void inline operator*=(const Decimal<T> & other) {
+		check_rounding(other._round_mode);
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->mul(this->val, other.val, this->round_mode, flags);
+			return this->mul(this->val, other.val, this->_round_mode, flags);
 		});
 	}
 	
 	void inline operator/=(const Decimal<T> & other) {
+		check_rounding(other._round_mode);
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->div(this->val, other.val, this->round_mode, flags);
+			return this->div(this->val, other.val, this->_round_mode, flags);
 		});
 	}
 
@@ -453,7 +501,7 @@ public:
 		auto val = value.empty()? "0" : value;
 		cstr c(val);
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->from_string(c.val, this->round_mode, flags);
+			return this->from_string(c.val, this->_round_mode, flags);
 		});
 	}
 
@@ -521,6 +569,17 @@ public:
 		return tmp;
 	}	
 };
+
+namespace decimal128 {
+static Decimal128 Zero(0);
+static Decimal128 One(1);
+static Decimal128 Max(std::string("9999999999999999999999999999999999") + "E+6111");
+static Decimal128 Min(std::string("-9999999999999999999999999999999999") + "E+6111");
+static Decimal128 SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
+static Decimal128 SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
+static Decimal128 Inf("Inf");
+}
+
 
 class Decimal64 : public Decimal<D64> {
 public:		
@@ -628,8 +687,7 @@ public:
             (33 decimal digits in the fractional part of the significand)
 	}
 	*/
-};
-	
-} // namespace markets
+};	
+} // namespace decimal754
 
 #endif // DECIMAL_H
