@@ -50,6 +50,7 @@ extern D128 __bid128_from_uint32 (uint32_t);
 extern D128 __bid128_from_uint64 (uint64_t);
 extern D128 __bid128_from_int32 (int32_t);
 extern D128 __bid128_from_int64 (int64_t);
+extern D128 __bid128_round_integral_zero (D128 x, ErrorFlags *pfpsf);
 extern D128 __bid128_abs (D128 x);
 extern D128 __bid128_negate (D128 x);
 extern D128 __bid128_add ( D128, D128, RoundMode, ErrorFlags *);
@@ -75,6 +76,7 @@ extern D64 __bid64_from_uint32 (uint32_t);
 extern D64 __bid64_from_uint64 (uint64_t);
 extern D64 __bid64_from_int32 (int32_t);
 extern D64 __bid64_from_int64 (int64_t);
+extern D64 __bid64_round_integral_zero (D128 x, ErrorFlags *pfpsf);
 extern D64 __bid64_abs (D64 x);
 extern D64 __bid64_negate (D64 x);
 extern D64 __bid64_add ( D64, D64, RoundMode, ErrorFlags *);
@@ -95,9 +97,11 @@ extern int __bid64_quiet_equal (D64 x, D64 y, ErrorFlags *pfpsf);
 extern int __bid64_quiet_less (D64 x, D64 y, ErrorFlags *pfpsf);
 }
 
+class IDecimal {};
+
 // Base class for decimal types
 template <class T>
-class Decimal {
+class DecimalBase : public IDecimal {
 public:
 	// rounding modes
 	// NearestEven apparently means half-even
@@ -129,19 +133,19 @@ protected:
 	// throws an exception if an invalid operation occurred	
 	void check_flags(const ErrorFlags flags) const { 
 		if ((flags & Error::Invalid) == Error::Invalid) {
-			throw Decimal::InvalidException("Invalid decimal operation", flags, *this);
+			throw DecimalBase::InvalidException("Invalid decimal operation", flags, *this);
 		} else if ((flags & Error::DivideByZero) == Error::DivideByZero && 
 			(this->_throw & Error::DivideByZero) == Error::DivideByZero) {
-			throw Decimal::DivideByZeroException("Attempt to divide by zero", flags, *this);
+			throw DecimalBase::DivideByZeroException("Attempt to divide by zero", flags, *this);
 		} else if ((flags & Error::Overflow) == Error::Overflow && 
 			(this->_throw & Error::Overflow) == Error::Overflow) {
-			throw Decimal::OverflowException("Overflow", flags, *this);
+			throw DecimalBase::OverflowException("Overflow", flags, *this);
 		} else if ((flags & Error::Underflow) == Error::Underflow && 
 			(this->_throw & Error::Underflow) == Error::Underflow) {
-			throw Decimal::UnderflowException("Underflow", flags, *this);
+			throw DecimalBase::UnderflowException("Underflow", flags, *this);
 		} else if ((flags & Error::Inexact) == Error::Inexact && 
 			(this->_throw & Error::Inexact) == Error::Inexact) {
-			throw Decimal::InexactException("Inexact", flags, *this);
+			throw DecimalBase::InexactException("Inexact", flags, *this);
 		}
 	}
 
@@ -155,7 +159,7 @@ protected:
 	// throws an exception if an operation involves 
 	// multiple values, but their respective rounding modes
 	// are not the same
-	void check_rounding(const RoundMode against) {
+	void check_rounding(const RoundMode against) const {
 		if (this->_round_mode != against) {
 			throw MismatchedRoundingException(this->_round_mode, against);
 		}
@@ -182,12 +186,15 @@ protected:
 	std::function<int(T)> is_signed;
 	std::function<int(T, T, ErrorFlags*)> quiet_equal;
 	std::function<int(T, T, ErrorFlags*)> quiet_less;
+	std::function<T(T, ErrorFlags *)> round_integral_zero;
 	std::function<T(T)> abs;
 	std::function<T(T)> negate;
-	std::function<T(T, T, RoundMode, ErrorFlags*)> add;
-	std::function<T(T, T, RoundMode, ErrorFlags*)> sub;
-	std::function<T(T, T, RoundMode, ErrorFlags*)> mul;
-	std::function<T(T, T, RoundMode, ErrorFlags*)> div;
+	std::function<T(T, T, RoundMode, ErrorFlags*)> _add;
+	std::function<T(T, T, RoundMode, ErrorFlags*)> _sub;
+	std::function<T(T, T, RoundMode, ErrorFlags*)> _mul;
+	std::function<T(T, T, RoundMode, ErrorFlags*)> _div;
+	
+	virtual void attach_bid_functions() = 0;
 	
 	// helper method to invoke an operation
 	// this method does not save any flags
@@ -243,16 +250,54 @@ protected:
 	};
 
 	// used by derived classes to set the rounding mode
-	Decimal(const RoundMode & round_mode = Round::NearestEven) : _round_mode(round_mode) {}
+	DecimalBase(const RoundMode & round_mode = Round::NearestEven) : _round_mode(round_mode) {}
+	
+	static const std::string random_str(const short precision, const short emin, const short emax) {
+		// Algorithm derived from IEEE754-2008, Page 8
+		// Signed zero and non-zero floating-point numbers of the form (−1)^s*b^q*c, where
+		// 	s is 0 or 1.
+		// 	q is any integer emin <= q + p − 1 <= emax.
+		// 	c is a number represented by a digit string of the form
+		//	d0 d1 d2 ... dp−1 where di is an integer digit 0 <= di < b (c is therefore an integer with 0 <= c < b^p).
+
+		// setup a random number generator,
+		// make it static so we don't have to rebuild it with every call
+ 		static std::random_device rd;
+    	static std::mt19937_64 gen(rd());
+
+		// use a bernoulli probability distribution to decide whether the number will be negative
+		static auto sign_dist = std::bernoulli_distribution(0.5);
+
+		// use a uniform integer distribution to generate the digits of the significand
+		// create two 64-bit integers, and use modulus to extract the first p / 2 bits of each
+		static auto significand_dist = std::uniform_int_distribution<uint64_t>(0, std::numeric_limits<uint64_t>::max());
+		static const long mask = pow(10, precision >> 1);
+		
+		// use a uniform integer distribution to generate the exponent in the range [emin - p + 1, emax - p + 1]
+		static auto exponent_dist = std::uniform_int_distribution<short>(emin, emax);
+	
+		// generate the random parameters	
+		bool negative = sign_dist(gen);
+		uint64_t significand_low = significand_dist(gen) % mask;
+		uint64_t significand_high = significand_dist(gen) % mask;
+		short exponent = exponent_dist(gen);
+
+		// create a string with the following format:
+		// "sDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDE+DDDD" + \0
+		auto n = precision + 8;
+		char result[n];
+		sprintf(result, "%c%llu%lluE%+d", (negative? '-' : '+'), significand_high, significand_low, exponent);
+		return result;
+	}
 	
 public:	 
 	struct Exception : public std::runtime_error {
 		const ErrorFlags flags;
-		const Decimal decimal;
+		const DecimalBase & decimal;
 
-		Exception(const std::string & message, ErrorFlags flags, const Decimal & decimal) 
+		Exception(const std::string & message, ErrorFlags flags, const DecimalBase & decimal) 
 			: std::runtime_error(message), flags(flags), decimal(decimal) {}
-		Exception(const char * message, ErrorFlags flags, const Decimal & decimal) 
+		Exception(const char * message, ErrorFlags flags, const DecimalBase & decimal) 
 			: std::runtime_error(message), flags(flags), decimal(decimal) {}
 	};
 	
@@ -276,11 +321,6 @@ public:
 	const bool overflow() const { return ((this->_errors & Error::Overflow)== Error::Overflow); }
 	const bool underflow() const { return ((this->_errors & Error::Underflow) == Error::Underflow); }
 	const bool inexact() const { return ((this->_errors & Error::Inexact) == Error::Inexact); }
-
-	// TODO: ADDITIONAL PROPERTIES
-	// SUBNORMAL
-	// PRECISION
-	// EMAX / EMIN
 
 	// combines the given error flags to produce a comma-separated list
 	static const std::string error_str(const unsigned int flags) {
@@ -337,12 +377,12 @@ public:
 			
 		return s.substr(start, count);
 	}
-
+	
 	// true if this decimal < 0	
 	const bool is_negative() const {
 		return (this->is_signed(this->val) > 0);
 	}
-
+	
 	// == operators to convert to native types == //
 	explicit operator unsigned char() const { 
 		return this->invoke<unsigned char>([&](ErrorFlags * flags) {
@@ -404,38 +444,66 @@ public:
 		});
 	}
 
+	void truncate() {
+		this->val =  this->invoke<T>([&](ErrorFlags * flags) {
+			return this->round_integral_zero (this->val, flags);
+		});
+	}
+		
 	// == arithmetic operators == //	
-	void inline operator+=(const Decimal<T> & other) {
-		check_rounding(other._round_mode);
+	void inline add(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->add(this->val, other.val, this->_round_mode, flags);
-		});
-	}
-	
-	void inline operator-=(const Decimal<T> & other) {
-		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->sub(this->val, other.val, this->_round_mode, flags);
-		});
-	}
-	
-	void inline operator*=(const Decimal<T> & other) {
-		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->mul(this->val, other.val, this->_round_mode, flags);
-		});
-	}
-	
-	void inline operator/=(const Decimal<T> & other) {
-		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->div(this->val, other.val, this->_round_mode, flags);
+			return this->_add(this->val, other.val, round_mode, flags);
 		});
 	}
 
-	// == comparison operators == //	
-	friend inline bool operator!=(const Decimal & l, const Decimal & r) { return !(l == r); }
-	friend inline bool operator==(const Decimal & l, const Decimal & r) { 
+	void inline operator+=(const DecimalBase & other) {
+		check_rounding(other._round_mode);
+		this->add(other, this->_round_mode);
+	}
+	
+	void inline subtract(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_sub(this->val, other.val, round_mode, flags);
+		});
+	}
+	
+	void inline operator-=(const DecimalBase & other) {
+		check_rounding(other._round_mode);
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_sub(this->val, other.val, this->_round_mode, flags);
+		});
+	}
+	
+	void inline multiply(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_mul(this->val, other.val, round_mode, flags);
+		});
+	}
+	
+	void inline operator*=(const DecimalBase & other) {
+		check_rounding(other._round_mode);
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_mul(this->val, other.val, this->_round_mode, flags);
+		});
+	}
+	
+	void inline divide(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_div(this->val, other.val, round_mode, flags);
+		});
+	}
+	
+	void inline operator/=(const DecimalBase & other) {
+		check_rounding(other._round_mode);
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_div(this->val, other.val, this->_round_mode, flags);
+		});
+	}
+
+	// == comparison operators == //	// TODO
+	friend inline bool operator!=(const DecimalBase & l, const DecimalBase & r) { return !(l == r); }
+	friend inline bool operator==(const DecimalBase & l, const DecimalBase & r) { 
 		ErrorFlags flags = Error::None;
 		auto result = l.quiet_equal (l.val, r.val, &flags);
 		return result > 0;
@@ -446,57 +514,61 @@ public:
 		//}) > 0);
 	}
 
-	friend inline bool operator>(const Decimal & l, const Decimal & r) { return r < l || l == r; }
-	friend inline bool operator<=(const Decimal & l, const Decimal & r) { return l < r || l == r; }
-	friend inline bool operator>=(const Decimal & l, const Decimal & r) { return l > r || l == r; }
-	friend inline bool operator<(const Decimal & l, const Decimal & r) {
+	friend inline bool operator>(const DecimalBase & l, const DecimalBase & r) { return r < l || l == r; }
+	friend inline bool operator<=(const DecimalBase & l, const DecimalBase & r) { return l < r || l == r; }
+	friend inline bool operator>=(const DecimalBase & l, const DecimalBase & r) { return l > r || l == r; }
+	friend inline bool operator<(const DecimalBase & l, const DecimalBase & r) {
 		ErrorFlags flags = Error::None;
 		auto result = l.quiet_less (l.val, r.val, &flags);
 		return result > 0;
 	}
 		
-	friend inline std::ostream& operator<<(std::ostream& stream, const Decimal & decimal) {
+	friend inline std::ostream& operator<<(std::ostream& stream, const DecimalBase & decimal) {
 		stream << decimal.str();
 		return stream;
-	}
+	}	
 };
 
 
-class Decimal128 : public Decimal<D128> {
+class LongDecimal : public DecimalBase<D128> {
 public:
-	Decimal128() : Decimal128(static_cast<int>(0)) {}
+	static const short precision = 34;
+	static const short emax = 6111;
+	static const short emin = -6176;
+
+	LongDecimal() : LongDecimal(static_cast<int>(0)) {}
 	
-	Decimal128(const unsigned char value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal128((unsigned int) value, round_mode) {}
-	Decimal128(const unsigned short value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal128((unsigned int) value, round_mode) {}
-	Decimal128(const unsigned int value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal(round_mode) { 
+	LongDecimal(const unsigned char value, const RoundMode round_mode = Round::NearestEven) 
+		: LongDecimal((unsigned int) value, round_mode) {}
+	LongDecimal(const unsigned short value, const RoundMode round_mode = Round::NearestEven) 
+		: LongDecimal((unsigned int) value, round_mode) {}
+	LongDecimal(const unsigned int value, const RoundMode round_mode = Round::NearestEven) 
+		: DecimalBase(round_mode) { 
 			this->attach_bid_functions();
 			this->val = this->from_uint32(value); 
 	}
-	Decimal128(const unsigned long value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal128((unsigned long long) value, round_mode) {}
-	Decimal128(const unsigned long long value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal(round_mode) { 
+	LongDecimal(const unsigned long value, const RoundMode round_mode = Round::NearestEven) 
+		: LongDecimal((unsigned long long) value, round_mode) {}
+	LongDecimal(const unsigned long long value, const RoundMode round_mode = Round::NearestEven) 
+		: DecimalBase(round_mode) { 
 			this->attach_bid_functions();
 			this->val = this->from_uint64(value); 
 	}
 	
-	Decimal128(const char value, const RoundMode round_mode = Round::NearestEven) : Decimal128((int) value, round_mode) {}
-	Decimal128(const short value, const RoundMode round_mode = Round::NearestEven) : Decimal128((int) value, round_mode) {}
-	Decimal128(const int value, const RoundMode round_mode = Round::NearestEven) : Decimal(round_mode) {
+	LongDecimal(const char value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((int) value, round_mode) {}
+	LongDecimal(const short value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((int) value, round_mode) {}
+	LongDecimal(const int value, const RoundMode round_mode = Round::NearestEven) : DecimalBase(round_mode) {
 		this->attach_bid_functions();
 		this->val = this->from_int32(value); 
 	}
-	Decimal128(const long value, const RoundMode round_mode = Round::NearestEven) : Decimal128((long long) value, round_mode) {}
-	Decimal128(const long long value, const RoundMode round_mode = Round::NearestEven) : Decimal128(round_mode) { 
+	LongDecimal(const long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((long long) value, round_mode) {}
+	LongDecimal(const long long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal(round_mode) { 
 		this->attach_bid_functions();
 		this->val = this->from_int64(value); 
 	}			
 	
-	Decimal128(const std::string & value, const RoundMode round_mode = Round::NearestEven) 
-		: Decimal(round_mode) {
+	LongDecimal(const std::string & value, const RoundMode round_mode = Round::NearestEven) 
+		: DecimalBase(round_mode) {
 		this->attach_bid_functions();
 		auto val = value.empty()? "0" : value;
 		cstr c(val);
@@ -505,7 +577,7 @@ public:
 		});
 	}
 
-	void attach_bid_functions() {
+	void attach_bid_functions() override {
 		this->from_string = bid128_from_string;
 		this->from_uint32 = bid128_from_uint32;
 		this->from_uint64 = bid128_from_uint64;
@@ -523,171 +595,144 @@ public:
 		this->is_signed = bid128_isSigned;
 		this->quiet_equal = bid128_quiet_equal;
 		this->quiet_less = bid128_quiet_less;
+		this->round_integral_zero = bid128_round_integral_zero;
 		this->abs = bid128_abs;
 		this->negate = bid128_negate;
-		this->add = bid128_add;
-		this->sub = bid128_sub;
-		this->mul = bid128_mul;
-		this->div = bid128_div;
+		this->_add = bid128_add;
+		this->_sub = bid128_sub;
+		this->_mul = bid128_mul;
+		this->_div = bid128_div;
 
 		this->val = this->from_uint64(0);
 	}
 	
-	friend inline Decimal128 abs(const Decimal128 & v) {
-		Decimal128 v2 = v;
+	friend inline LongDecimal truncate(const LongDecimal & v) {
+		LongDecimal v2 = v;
+		v2.truncate();
+		return v2;
+	};
+		
+	friend inline LongDecimal abs(const LongDecimal & v) {
+		LongDecimal v2 = v;
 		v2.val = v.abs(v2.val);
 		return v2;
 	}	
-	
-	friend inline Decimal128 operator-(const Decimal128 & v) {
-		Decimal128 v2 = v;
+
+	friend inline LongDecimal operator-(const LongDecimal & v) {
+		LongDecimal v2 = v;
 		v2.val = v.negate(v2.val);
 		return v2;
 	}	
+
+	friend inline LongDecimal add(const LongDecimal & l, const LongDecimal & r, const RoundMode round_mode = Round::NearestEven) {
+		LongDecimal tmp = l;
+		tmp.add(r, round_mode);
+		return tmp;
+	}
 	
-	friend inline Decimal128 operator+(const Decimal128 & l, const Decimal128 & r) {
-		Decimal128 tmp = l;
+	friend inline LongDecimal operator+(const LongDecimal & l, const LongDecimal & r) {
+		l.check_rounding(r._round_mode);
+		LongDecimal tmp = l;
 		tmp += r;
 		return tmp;
 	}	
 	
-	friend inline Decimal128 operator-(const Decimal128 & l, const Decimal128 & r) {
-		Decimal128 tmp = l;
+	friend inline LongDecimal subtract(const LongDecimal & l, const LongDecimal & r, const RoundMode round_mode = Round::NearestEven) {
+		LongDecimal tmp = l;
+		tmp.subtract(r, round_mode);
+		return tmp;
+	}
+	
+	friend inline LongDecimal operator-(const LongDecimal & l, const LongDecimal & r) {
+		LongDecimal tmp = l;
 		tmp -= r;
 		return tmp;
 	}	
 	
-	friend inline Decimal128 operator*(const Decimal128 & l, const Decimal128 & r) {
-		Decimal128 tmp = l;
+	friend inline LongDecimal multiply(const LongDecimal & l, const LongDecimal & r, const RoundMode round_mode = Round::NearestEven) {
+		LongDecimal tmp = l;
+		tmp.multiply(r, round_mode);
+		return tmp;
+	}
+	
+	friend inline LongDecimal operator*(const LongDecimal & l, const LongDecimal & r) {
+		LongDecimal tmp = l;
 		tmp *= r;
 		return tmp;
 	}	
 	
-	friend inline Decimal128 operator/(const Decimal128 & l, const Decimal128 & r) {
-		Decimal128 tmp = l;
+	friend inline LongDecimal divide(const LongDecimal & l, const LongDecimal & r, const RoundMode round_mode = Round::NearestEven) {
+		LongDecimal tmp = l;
+		tmp.divide(r, round_mode);
+		return tmp;
+	}
+	
+	friend inline LongDecimal operator/(const LongDecimal & l, const LongDecimal & r) {
+		LongDecimal tmp = l;
 		tmp /= r;
 		return tmp;
 	}	
+		
+	// Generates a random decimal	
+	// Does not generate Inf, -Inf, NaN, or subnormal numbers
+	static const LongDecimal random() { 	
+		auto result = random_str(LongDecimal::precision, LongDecimal::emin, LongDecimal::emax);
+		return LongDecimal(result);
+	};	
 };
 
-namespace decimal128 {
-static Decimal128 Zero(0);
-static Decimal128 One(1);
-static Decimal128 Max(std::string("9999999999999999999999999999999999") + "E+6111");
-static Decimal128 Min(std::string("-9999999999999999999999999999999999") + "E+6111");
-static Decimal128 SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
-static Decimal128 SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
-static Decimal128 Inf("Inf");
-}
-
-
-class Decimal64 : public Decimal<D64> {
+class Decimal : public DecimalBase<D64> {
 public:		
-	Decimal64() : Decimal() {
-		this->from_string = bid64_from_string;
-		this->from_uint32 = bid64_from_uint32;
-		this->from_uint64 = bid64_from_uint64;
-		this->from_int32 = bid64_from_int32;
-		this->from_int64 = bid64_from_int64;
-		this->to_string = bid64_to_string;
-		this->to_uint8_xrnint = bid64_to_uint8_xrnint;
-		this->to_uint16_xrnint = bid64_to_uint16_xrnint;
-		this->to_uint32_xrnint = bid64_to_uint32_xrnint;
-		this->to_uint64_xrnint = bid64_to_uint64_xrnint;
-		this->to_int8_xrnint = bid64_to_int8_xrnint;
-		this->to_int16_xrnint = bid64_to_int16_xrnint;
-		this->to_int32_xrnint = bid64_to_int32_xrnint;
-		this->to_int64_xrnint = bid64_to_int64_xrnint;
-		this->is_signed = bid64_isSigned;
-		this->quiet_equal = bid64_quiet_equal;
-		this->quiet_less = bid64_quiet_less;
+	static const short precision = 16;
+	static const short emax = 369;
+	static const short emin = -398;
+
+	Decimal() : DecimalBase() {}
+	
+	Decimal(const std::string & value) : Decimal() {}
+	Decimal(const unsigned char value) : Decimal() {}
+	Decimal(const unsigned short value) : Decimal() {}
+	Decimal(const unsigned int value) : Decimal() {}
+	Decimal(const unsigned long value) : Decimal() {}
+	Decimal(const unsigned long long value) : Decimal() {}
+	Decimal(const char value) : Decimal() {}
+	Decimal(const short value) : Decimal() {}
+	Decimal(const int value) : Decimal() {}
+	Decimal(const long value) : Decimal() {}
+	Decimal(const long long value) : Decimal() {}
+	
+	void attach_bid_functions() override { 
+		// TODO:
 	}
 	
-	Decimal64(const std::string & value) : Decimal64() {}
-	Decimal64(const unsigned char value) : Decimal64() {}
-	Decimal64(const unsigned short value) : Decimal64() {}
-	Decimal64(const unsigned int value) : Decimal64() {}
-	Decimal64(const unsigned long value) : Decimal64() {}
-	Decimal64(const unsigned long long value) : Decimal64() {}
-	Decimal64(const char value) : Decimal64() {}
-	Decimal64(const short value) : Decimal64() {}
-	Decimal64(const int value) : Decimal64() {}
-	Decimal64(const long value) : Decimal64() {}
-	Decimal64(const long long value) : Decimal64() {}
+	// Generates a random decimal	
+	// Does not generate Inf, -Inf, NaN, or subnormal numbers
+	static const Decimal random() { 	
+		auto result = random_str(Decimal::precision, Decimal::emin, Decimal::emax);
+		return Decimal(result);
+	};	
 };
 
-class DecimalFactory {
-public:
-	/*
-	IDecimal random() {
-		// Algorithm derived from IEEE754-2008, Page 8
-		// http://www.dsc.ufcg.edu.br/~cnum/modulos/Modulo2/IEEE754_2008.pdf
-		// Signed zero and non-zero floating-point numbers of the form (−1)^s*b^q*c, where
-		// 	s is 0 or 1.
-		// 	q is any integer emin <= q + p − 1 <= emax.
-		// 	c is a number represented by a digit string of the form
-		//	d0 d1 d2 ... dp−1 where di is an integer digit 0 <= di < b (c is therefore an integer with 0 <= c < b^p).
-		//
-		//	For Decimal128:
-		//	p = 34
-		//	emax = 6144
-		//	emin = -6143
-		//
-		//	For Decimal64:
-		//	p = 16
-		//	emax = 384
-		//	emin = -383
+namespace decimal {
+	static Decimal Zero(0);
+	static Decimal One(1);
+	static Decimal Max(std::string("9999999999999999999999999999999999") + "E+6111"); // TODO - WRONG EMAX
+	static Decimal Min(std::string("-9999999999999999999999999999999999") + "E+6111");
+	static Decimal SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
+	static Decimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
+	static Decimal Inf("Inf");
+}
 
-		// setup a random number generator,
-		// make it static so we don't have to rebuild it with every call
-		static std::random_device rd;
-		static std::mt19937_64 gen(rd());
+namespace longDecimal {
+	static LongDecimal Zero(0);
+	static LongDecimal One(1);
+	static LongDecimal Max(std::string("9999999999999999999999999999999999") + "E+6111");
+	static LongDecimal Min(std::string("-9999999999999999999999999999999999") + "E+6111");
+	static LongDecimal SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
+	static LongDecimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
+	static LongDecimal Inf("Inf");
+}
 
-		// use a bernoulli probability distribution to decide whether the number will be negative
-		static auto sign_dist = std::bernoulli_distribution(0.5);
-		bool negative = sign_dist(gen);
-
-		// use a uniform integer distribution to generate the digits of the significand
-		// create two 64-bit integers, and use modulus to extract the first p / 2 bits of each
-		static auto significand_dist = std::uniform_int_distribution<uint64_t>(0, std::numeric_limits<uint64_t>::max());
-		uint64_t significand_low = significand_dist(gen) % 100000000000000000;
-		uint64_t significand_high = significand_dist(gen) % 100000000000000000;
-
-		// use a uniform integer distribution to generate the exponent in the range [emin - p + 1, emax - p + 1]
-		static auto exponent_dist = std::uniform_int_distribution<short>(-6176, 6111);
-		int exponent = exponent_dist(gen);
-
-		// create a string with the following format:
-		// "sDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDE+DDDD" + \0
-		auto n = 1 + 34 + 2 + 4 + 1;
-		char result[n];
-		sprintf(result, "%c%llu%lluE%+d", (negative? '-' : '+'), significand_high, significand_low, exponent);
-
-		std::cout << "Random number: " << result << std::endl;
-
-		// use the string to create a decimal
-		return Decimal128(); // TODO:
-		//return Decimal128(result);
-		The maximum number of decimal digits in the significand of numerical
-    values represented in these three formats are:
-      P = 7 decimal digits for the 32-bit decimal floating-point format
-      P = 16 decimal digits for the 64-bit decimal floating-point format
-      P = 34 decimal digits for the 128-bit decimal floating-point format
-    The ranges for normal decimal floating-point numbers are (in magnitude):
-      1.000000 * 10^(-95) <= x <= 9.999999 * 10^96 for 32-bit format
-      1.0...0 * 10^(-383) <= x <= 9.9...9 * 10^384 for 64-bit format
-            (15 decimal digits in the fractional part of the significand)
-      1.0...0 * 10^(-6143) <= x <= 9.9...9 * 10^6144 for 128-bit format
-            (33 decimal digits in the fractional part of the significand)
-    The ranges for subnormal decimal floating-point numbers are (in magnitude):
-      0.000001 * 10^(-95) <= x <= 0.999999 * 10^(-95) for 32-bit format
-      0.0...01 * 10^(-383) <= x <= 0.9...9 * 10^(-383) for 64-bit format
-            (15 decimal digits in the fractional part of the significand)
-      0.0...01 * 10^(-6144) <= x <= 0.9...9 * 10^(-6144) for 128-bit format
-            (33 decimal digits in the fractional part of the significand)
-	}
-	*/
-};	
 } // namespace decimal754
 
 #endif // DECIMAL_H

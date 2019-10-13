@@ -22,45 +22,91 @@
 
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include "decimal.h"
 #include "catch.hpp"
 
 using namespace decimal754;
 using namespace std;
 
-Decimal128 ntwo("-2");
-Decimal128 none("-1");
-Decimal128 zero("0");
-Decimal128 one("1");
-Decimal128 two("2");
-Decimal128 three("3");
-Decimal128 four("4");
-Decimal128 five("5");
-Decimal128 six("6");
-Decimal128 ten("10");
+LongDecimal ntwo("-2");
+LongDecimal none("-1");
+LongDecimal zero("0");
+LongDecimal one("1");
+LongDecimal two("2");
+LongDecimal three("3");
+LongDecimal four("4");
+LongDecimal five("5");
+LongDecimal six("6");
+LongDecimal ten("10");
 
-typedef Decimal128 d;
+typedef LongDecimal d;
+std::random_device rd;
+
+const int LOOP_SIZE = 100;
+
+template <class T>
+static const vector<T> random_ld() {
+	vector<T> v;
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		v.push_back(T::random());
+	}
+
+	return v;
+}
+
+static const vector<LongDecimal> A() {
+	static vector<LongDecimal> a;
+	if (a.empty()) {
+		a = random_ld<LongDecimal>();
+	}
+
+	return a;
+}
+
+static const vector<LongDecimal> B() {
+	static vector<LongDecimal> b;
+	if (b.empty()) {
+		b = random_ld<LongDecimal>();
+	}
+
+	return b;
+}
+
+/*
+static const vector<int> () {
+	static vector<int> ia;
+	if (ia.empty()) {
+		auto a = A();
+		for (auto v = ia.begin(); v != a.end(); ++v) {
+			ia.push_back((int) *v);
+		}
+	}
+
+	return ia;
+}
+*/
 
 TEST_CASE( "Constants", "[constants]" ) {
 	SECTION("Values") {
-		REQUIRE( decimal128::Zero == d(0) );
-		REQUIRE( decimal128::One == d(1) );
-		REQUIRE( decimal128::Max == d(std::string("9999999999999999999999999999999999") + "E+6111") );
-		REQUIRE( decimal128::Min == d(std::string("-9999999999999999999999999999999999") + "E+6111") );
-		REQUIRE( decimal128::SmallestPositive == d(std::string("9999999999999999999999999999999999") + "E-6176") );
-		REQUIRE( decimal128::SmallestNegative == d(std::string("-9999999999999999999999999999999999") + "E-6176") );
-		REQUIRE( decimal128::Inf == d("Inf") );
+		REQUIRE( longDecimal::Zero == d(0) );
+		REQUIRE( longDecimal::One == d(1) );
+		REQUIRE( longDecimal::Max == d(std::string("9999999999999999999999999999999999") + "E+6111") );
+		REQUIRE( longDecimal::Min == d(std::string("-9999999999999999999999999999999999") + "E+6111") );
+		REQUIRE( longDecimal::SmallestPositive == d(std::string("9999999999999999999999999999999999") + "E-6176") );
+		REQUIRE( longDecimal::SmallestNegative == d(std::string("-9999999999999999999999999999999999") + "E-6176") );
+		REQUIRE( longDecimal::Inf == d("Inf") );
 	}
 
 	SECTION("Uniqueness") {
-		vector<Decimal128> v = { 
-			decimal128::Zero, 
-			decimal128::One, 
-			decimal128::Max, 
-			decimal128::Min, 
-			decimal128::SmallestPositive, 
-			decimal128::SmallestNegative, 
-			decimal128::Inf 
+		vector<LongDecimal> v = { 
+			longDecimal::Zero, 
+			longDecimal::One, 
+			longDecimal::Max, 
+			longDecimal::Min, 
+			longDecimal::SmallestPositive, 
+			longDecimal::SmallestNegative, 
+			longDecimal::Inf 
 		};
 
 		for (auto i = v.begin(); i != v.end(); i++) {
@@ -75,65 +121,288 @@ TEST_CASE( "Constants", "[constants]" ) {
 
 // TODO: constructors
 
-TEST_CASE( "Unary operators", "[unary operators]" ) { // TODO: Use random values
-	REQUIRE ( d(2) != d() );
-	REQUIRE ( d(-2) != d() );
+TEST_CASE( "Random Decimals", "[random]" ) {
+	auto a = A();
+	auto b = B();
 
-	SECTION("Negation") {
-		REQUIRE( -d(2) == d(-2) );
-		REQUIRE( -(-(d(2))) == d(2) );
-	}
-
-	SECTION("Absolute Value") {
-		REQUIRE( abs(d(-2)) == d(2) );
-		REQUIRE( abs(d(2)) == d(2) );
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		CHECK( a[i] != b[i]);
+		if (a[i] == b[i]) {
+			cout << "!!! The odds of this happening are astronomical !!!" << endl;
+		}
 	}
 }
 
-TEST_CASE( "Binary operators", "binary operators" ) {
-	REQUIRE ( d(2) != d(3) );
-	REQUIRE ( d(2) != d(4) );
+TEST_CASE( "Unary operators", "[unary]" ) { 
+	SECTION("Sanity Check") {
+		REQUIRE ( d(2) != d() );
+		REQUIRE ( d(-2) != d() );
+		
+		SECTION("Negation") {
+			REQUIRE( -d(2) == d(-2) );
+			REQUIRE( -(-(d(2))) == d(2) );
+		}
+	
+		SECTION("Absolute Value") {
+			REQUIRE( abs(d(2)) == d(2) );
+			REQUIRE( abs(d(-2)) == d(2) );
+		}
+	}
 
-	SECTION("Addition") {
-		REQUIRE( d(2) + d(3) == d(5) );
+	SECTION("Random") {
+		auto a = A();
+		SECTION("Negation") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				REQUIRE( (-a[i]).is_negative() != (a[i]).is_negative() );
+			}
+		} 
+		
+		SECTION("Absolute Value") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				if (a[i].is_negative()){
+					REQUIRE( abs(a[i]) == -a[i] );
+					REQUIRE( abs(-a[i]) == -a[i] );
+				} else {
+					REQUIRE( abs(a[i]) == a[i] );
+					REQUIRE( abs(-a[i]) == a[i] );
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE( "Binary operators", "binary" ) {
+	SECTION("Sanity Check") {
+		REQUIRE ( d(2) != d(3) );
+		REQUIRE ( d(2) != d(4) );
+
+		SECTION("Addition") {
+			auto a = d(2);
+			auto b = d(3);
+			REQUIRE( a + b == d(5) );
+
+			a += b;
+			REQUIRE( a == d(5) );
+
+			a = d(2);
+			a.add(b);
+			REQUIRE( a == d(5) );
+		}
+		
+		SECTION("Subtraction") {
+			auto a = d(2);
+			auto b = d(3);
+			REQUIRE( a - b == d(-1) );
+
+			a -= b;
+			REQUIRE( a == d(-1) );
+			
+			a = d(2);
+			a.subtract(b);
+			REQUIRE( a == d(-1) );
+		}
+
+		SECTION("Multiplication") {
+			auto a = d(2);
+			auto b = d(3);
+			REQUIRE( a * b == d(6) );
+
+			a *= b;
+			REQUIRE( a == d(6) );
+			
+			a = d(2);
+			a.multiply(b);
+			REQUIRE( a == d(6) );
+		}
+		
+		SECTION("Division") {
+			auto a = d(4);
+			auto b = d(2);
+			REQUIRE( a / b == d(2) );
+
+			a /= b;
+			REQUIRE( a == d(2) );
+			REQUIRE( d(1) / d(10) == d("0.1") );
+			
+			a = d(4);
+			a.divide(b);
+			REQUIRE( a == d(2) );
+		}
 	}
 	
-	SECTION("Subtraction") {
-		REQUIRE( d(2) - d(3) == -d(1) );
-	}
+	SECTION("Random") {
+    	std::mt19937_64 gen(rd());
+		auto min = numeric_limits<int>::min();
+		auto max = numeric_limits<int>::max();
+		auto int_dist = uniform_int_distribution<int>(min, max);
 
-	SECTION("Multiplication") {
-		REQUIRE( d(2) * d(3) == d(6) );
-	}
-	
-	SECTION("Division") {
-		REQUIRE( d(4) / d(2) == d(2) );
-		REQUIRE( d(1) / d(10) == d("0.1") );
+		SECTION("Addition") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				auto a = int_dist(gen);
+				auto b = int_dist(gen);
+
+				// avoid overflow
+				if (((b > 0) && (a > max - b)) || ((b < 0) && (a < min - b))) {
+					continue;
+				}
+
+				auto A = d(a);
+				auto B = d(b);
+				REQUIRE( (A + B) == d(a + b) );
+
+				A += B;
+				REQUIRE( A == d(a + b) );
+
+				A = d(a);
+				A.add(B);
+				REQUIRE( A == d(a + b) );
+			}
+		}
+			
+		SECTION("Subtraction") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				auto a = int_dist(gen);
+				auto b = int_dist(gen);
+
+				// avoid overflow
+				if (((b < 0) && (a > max - b)) || ((b > 0) && (a < min - b))) {
+					continue;
+				}
+
+				auto A = d(a);
+				auto B = d(b);
+				REQUIRE( (A - B) == d(a - b) );
+
+				A -= B;
+				REQUIRE( A == d(a - b) );
+
+				A = d(a);
+				A.subtract(B);
+				REQUIRE( A == d(a - b) );
+			}
+		}
+
+		SECTION("Multiplication") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				auto a = int_dist(gen);
+				auto b = int_dist(gen);
+
+				// avoid overflow
+				if ((a > max / b) || ((a < min / b))) {
+					continue;
+				}
+
+				auto A = d(a);
+				auto B = d(b);
+				REQUIRE( A * B == d(a * b) );
+
+				A *= B;
+				REQUIRE( A == d(a * b) );
+				
+				A = d(a);
+				A.multiply(B);
+				REQUIRE( A == d(a * b) );
+			}
+		}
+		
+		SECTION("Division") {
+			for (int i=0; i < LOOP_SIZE; ++i) {
+				auto a = int_dist(gen);
+				auto b = int_dist(gen);
+
+				// avoid overflow
+				if (((a == -1) && (b == min)) || ((b == -1) && (a == min))) {
+					continue;
+				}
+				
+				auto A = d(a);
+				auto B = d(b);
+				REQUIRE( truncate(A / B) == d(a / b) );
+
+				A /= B;
+				REQUIRE( truncate(A) == d(a / b) );
+				
+				A = d(a);
+				A.divide(B);
+				REQUIRE( truncate(A) == d(a / b) );
+			}
+		}
 	}
 }
 
 TEST_CASE( "Identity Properties", "[identities]" ) {
-    REQUIRE( d(2) + decimal128::Zero == d(2) );
-    REQUIRE( d(2) * decimal128::One == d(2) );
+	SECTION("Sanity Check") {
+		REQUIRE( d(2) + longDecimal::Zero == d(2) );
+		REQUIRE( d(2) * longDecimal::One == d(2) );
+	}	
+
+	SECTION("Random") {
+		std::mt19937_64 gen(rd());
+		auto min = numeric_limits<int>::min();
+		auto max = numeric_limits<int>::max();
+		auto int_dist = uniform_int_distribution<int>(min, max);
+		for (int i=0; i < LOOP_SIZE; i++) {
+			auto a = int_dist(gen);
+			REQUIRE( d(a) + longDecimal::Zero == d(a) );
+			REQUIRE( d(a) * longDecimal::One == d(a) );
+		}
+	}
 }
 
 TEST_CASE( "Laws", "[laws]" ) {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<int>::min();
+	auto max = numeric_limits<int>::max();
+	auto int_dist = uniform_int_distribution<int>(min, max);
+
 	SECTION("Commutative") {
-		REQUIRE( d(2) + d(3) == d(3) + d(2) );
-		REQUIRE( d(2) * d(3) == d(2) * d(3) );
+		SECTION("Sanity Check") {
+			REQUIRE( d(2) + d(3) == d(3) + d(2) );
+			REQUIRE( d(2) * d(3) == d(2) * d(3) );
+		}
+	
+		SECTION("Random") {
+			auto a = int_dist(gen);
+			auto b = int_dist(gen);
+			REQUIRE( d(a) + d(b) == d(b) + d(a) );
+			REQUIRE( d(a) * d(b) == d(b) * d(a) );
+		}
 	}
+
 	SECTION( "Associative Laws", "[laws]" ) {
-		REQUIRE( (d(2) + d(3)) + d(4) == d(2) + (d(3) + d(4)) );
-		REQUIRE( (d(2) * d(3)) * d(4) == d(2) * (d(3) * d(4)) );
+		SECTION("Sanity Check") {
+			REQUIRE( (d(2) + d(3)) + d(4) == d(2) + (d(3) + d(4)) );
+			REQUIRE( (d(2) * d(3)) * d(4) == d(2) * (d(3) * d(4)) );
+		}
+		
+		SECTION("Random") {
+			auto a = int_dist(gen);
+			auto b = int_dist(gen);
+			auto c = int_dist(gen);
+			REQUIRE( (d(a) + d(b)) + d(c) == d(a) + (d(b) + d(c)) );
+			REQUIRE( (d(a) * d(b)) * d(c) == d(a) * (d(b) * d(c)) );
+		}
 	}
+
 	SECTION( "Distributive Law", "[laws]" ) {
-		REQUIRE( d(2) * (d(3) + d(4)) == (d(2) * d(3)) + (d(2) * d(4)) );
+		SECTION("Sanity Check") {
+			REQUIRE( d(2) * (d(3) + d(4)) == (d(2) * d(3)) + (d(2) * d(4)) );
+		}
+		
+		SECTION("Random") {
+			auto min = numeric_limits<int>::min();
+			auto max = numeric_limits<int>::max();
+			auto a = int_dist(gen);
+			auto b = int_dist(gen);
+			auto c = int_dist(gen);
+			REQUIRE( d(a) * (d(b) + d(c)) == (d(a) * d(b)) + (d(a) * d(c)) );
+		}
 	}
 }
 
 TEST_CASE( "Exceptions: Invalid", "[invalid]" ) {
-	auto zero = decimal128::Zero;
-	auto inf = decimal128::Inf;
+	auto zero = longDecimal::Zero;
+	auto inf = longDecimal::Inf;
 
 	SECTION("Indeterminate Forms") {
 		REQUIRE_THROWS_AS( zero / zero, d::InvalidException);
@@ -162,42 +431,42 @@ TEST_CASE( "Exceptions: Invalid", "[invalid]" ) {
 }
 
 TEST_CASE( "Exceptions: Divide by Zero", "[zerodivide]" ) {
-	auto one = decimal128::One;
-	auto zero = decimal128::Zero;
+	auto one = longDecimal::One;
+	auto zero = longDecimal::Zero;
 
 	auto res = one / zero;
-	REQUIRE( res == decimal128::Inf);
+	REQUIRE( res == longDecimal::Inf);
 	REQUIRE( res.errors() == d::Error::DivideByZero); 
 
-	one.throw_on(Decimal128::Error::DivideByZero);
-	REQUIRE_THROWS_AS( one / zero, Decimal128::DivideByZeroException);
+	one.throw_on(LongDecimal::Error::DivideByZero);
+	REQUIRE_THROWS_AS( one / zero, LongDecimal::DivideByZeroException);
 	
-	one.throw_off(Decimal128::Error::DivideByZero);
+	one.throw_off(LongDecimal::Error::DivideByZero);
 	REQUIRE_NOTHROW( one / zero );
 
-	one.throw_on(Decimal128::Error::Any);
-	REQUIRE_THROWS_AS( one / zero, Decimal128::DivideByZeroException);
+	one.throw_on(LongDecimal::Error::Any);
+	REQUIRE_THROWS_AS( one / zero, LongDecimal::DivideByZeroException);
 }
 
 TEST_CASE( "Exceptions: Overflow / Underflow", "[overflow]" ) {
-	auto one = decimal128::One;
-	auto zero = decimal128::Zero;
-	auto max = decimal128::Max;
-	auto smallest = decimal128::SmallestPositive;
+	auto one = longDecimal::One;
+	auto zero = longDecimal::Zero;
+	auto max = longDecimal::Max;
+	auto smallest = longDecimal::SmallestPositive;
 	
 	SECTION("Overflow") {
 		auto res = max + max;
 		REQUIRE( res.overflow() );
 		REQUIRE( res.errors() == (d::Error::Overflow | d::Error::Inexact) ); 
 
-		max.throw_on(Decimal128::Error::Overflow);
-		REQUIRE_THROWS_AS( max + max, Decimal128::OverflowException );
+		max.throw_on(LongDecimal::Error::Overflow);
+		REQUIRE_THROWS_AS( max + max, LongDecimal::OverflowException );
 		
-		max.throw_off(Decimal128::Error::Overflow );
+		max.throw_off(LongDecimal::Error::Overflow );
 		REQUIRE_NOTHROW( max + max );
 
-		max.throw_on(Decimal128::Error::Any);
-		REQUIRE_THROWS_AS( max + max, Decimal128::OverflowException );
+		max.throw_on(LongDecimal::Error::Any);
+		REQUIRE_THROWS_AS( max + max, LongDecimal::OverflowException );
 	}
 	
 	SECTION("Underflow") {
@@ -205,80 +474,87 @@ TEST_CASE( "Exceptions: Overflow / Underflow", "[overflow]" ) {
 		REQUIRE( res.underflow() );
 		REQUIRE( res.errors() == (d::Error::Underflow | d::Error::Inexact) ); 
 
-		smallest.throw_on(Decimal128::Error::Underflow);
-		REQUIRE_THROWS_AS( smallest / max, Decimal128::UnderflowException );
+		smallest.throw_on(LongDecimal::Error::Underflow);
+		REQUIRE_THROWS_AS( smallest / max, LongDecimal::UnderflowException );
 		
-		smallest.throw_off(Decimal128::Error::Underflow);
+		smallest.throw_off(LongDecimal::Error::Underflow);
 		REQUIRE_NOTHROW( smallest / max );
 
-		smallest.throw_on(Decimal128::Error::Any);
-		REQUIRE_THROWS_AS( smallest / max, Decimal128::UnderflowException );
+		smallest.throw_on(LongDecimal::Error::Any);
+		REQUIRE_THROWS_AS( smallest / max, LongDecimal::UnderflowException );
 	}
 }
 
 TEST_CASE( "Exceptions: Inexact", "[inexact]" ) {
-	auto a = d(2, Decimal128::Round::NearestEven);	
-	auto b = d(3, Decimal128::Round::NearestEven);	
+	auto a = d(2, LongDecimal::Round::NearestEven);	
+	auto b = d(3, LongDecimal::Round::NearestEven);	
 
 	auto res = a / b;
 	REQUIRE( res == d("0.6666666666666666666666666666666667"));
 	REQUIRE( res.inexact() );
 	REQUIRE( res.errors() == d::Error::Inexact);	
 	
-	a.throw_on(Decimal128::Error::Inexact);
-	REQUIRE_THROWS_AS( a / b, Decimal128::InexactException );
+	a.throw_on(LongDecimal::Error::Inexact);
+	REQUIRE_THROWS_AS( a / b, LongDecimal::InexactException );
 	
-	a.throw_off(Decimal128::Error::Inexact);
+	a.throw_off(LongDecimal::Error::Inexact);
 	REQUIRE_NOTHROW( a / b );
 
-	a.throw_on(Decimal128::Error::Any);
-	REQUIRE_THROWS_AS( a / b, Decimal128::InexactException );
+	a.throw_on(LongDecimal::Error::Any);
+	REQUIRE_THROWS_AS( a / b, LongDecimal::InexactException );
 }
 
 TEST_CASE( "Rounding", "[rounding]" ) {
 	SECTION( "Nearest Even" ) {
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::NearestEven);
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::NearestEven);
 		REQUIRE( a == d("10000000000000000000000000000000020") );
 		
-		a = d("-10000000000000000000000000000000025", Decimal128::Round::NearestEven);
+		a = d("-10000000000000000000000000000000025", LongDecimal::Round::NearestEven);
 		REQUIRE( a == d("-10000000000000000000000000000000020") );
 	}
 	
 	SECTION( "Nearest Away" ) {	
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::NearestAway);
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::NearestAway);
 		REQUIRE( a == d("10000000000000000000000000000000030") );
 		
-		a = d("-10000000000000000000000000000000025", Decimal128::Round::NearestAway);
+		a = d("-10000000000000000000000000000000025", LongDecimal::Round::NearestAway);
 		REQUIRE( a == d("-10000000000000000000000000000000030") );
 	}
 	
 	SECTION( "Upward" ) {	
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::Upward);
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::Upward);
 		REQUIRE( a == d("10000000000000000000000000000000030") );
 		
-		a = d("-10000000000000000000000000000000025", Decimal128::Round::Upward);
+		a = d("-10000000000000000000000000000000025", LongDecimal::Round::Upward);
 		REQUIRE( a == d("-10000000000000000000000000000000020") );
 	}
 		
 	SECTION( "Downward" ) {	
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::Downward);
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::Downward);
 		REQUIRE( a == d("10000000000000000000000000000000020") );
 		
-		a = d("-10000000000000000000000000000000025", Decimal128::Round::Downward);
+		a = d("-10000000000000000000000000000000025", LongDecimal::Round::Downward);
 		REQUIRE( a == d("-10000000000000000000000000000000030") );
 	}
 	
 	SECTION( "Toward Zero" ) {	
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::TowardZero);
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::TowardZero);
 		REQUIRE( a == d("10000000000000000000000000000000020") );
 		
-		a = d("-10000000000000000000000000000000025", Decimal128::Round::TowardZero);
+		a = d("-10000000000000000000000000000000025", LongDecimal::Round::TowardZero);
 		REQUIRE( a == d("-10000000000000000000000000000000020") );
 	}
 
-	SECTION( "Mismatched" ) {
-		auto a = d("10000000000000000000000000000000025", Decimal128::Round::NearestEven);
-		auto b = d("10000000000000000000000000000000015", Decimal128::Round::NearestAway);
-		REQUIRE_THROWS_AS( a + b, Decimal128::MismatchedRoundingException);
+	SECTION( "Mismatched throws by default" ) {
+		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::NearestEven);
+		auto b = d("10000000000000000000000000000000015", LongDecimal::Round::NearestAway);
+		REQUIRE_THROWS_AS( a + b, LongDecimal::MismatchedRoundingException);
+	}
+
+	SECTION( "Mismatched error can be overcome by specifying a round mode with a function" ) {
+		auto a = d(5);
+		auto b = d(9);
+		a.divide(b, LongDecimal::Round::TowardZero);
+		REQUIRE( a == d("0.5555555555555555555555555555555555") );
 	}
 }
