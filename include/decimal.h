@@ -67,6 +67,8 @@ extern int16_t __bid128_to_int16_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int32_t __bid128_to_int32_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int64_t __bid128_to_int64_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int __bid128_isSigned (D128 x);
+extern int __bid128_isNormal (D128 x);
+extern int __bid128_isZero (D128 x);
 extern int __bid128_quiet_equal (D128 x, D128 y, ErrorFlags *pfpsf);
 extern int __bid128_quiet_less (D128 x, D128 y, ErrorFlags *pfpsf); // TODO: SIGNALLING?
 
@@ -93,15 +95,13 @@ extern int16_t __bid64_to_int16_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int32_t __bid64_to_int32_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int64_t __bid64_to_int64_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int __bid64_isSigned (D64 x);
+extern int __bid64_isNormal (D128 x);
+extern int __bid64_isZero (D64 x);
 extern int __bid64_quiet_equal (D64 x, D64 y, ErrorFlags *pfpsf);
 extern int __bid64_quiet_less (D64 x, D64 y, ErrorFlags *pfpsf);
 }
 
-class IDecimal {};
-
-// Base class for decimal types
-template <class T>
-class DecimalBase : public IDecimal {
+class IDecimal {
 public:
 	// rounding modes
 	// NearestEven apparently means half-even
@@ -122,7 +122,42 @@ public:
 		Inexact			= 0x20,
 		Any				= 0xFF
 	};
+	
+	struct Exception : public std::runtime_error {
+		const ErrorFlags flags;
+		const IDecimal & decimal;
 
+		Exception(const std::string & message, ErrorFlags flags, const IDecimal & decimal) 
+			: std::runtime_error(message), flags(flags), decimal(decimal) {}
+		Exception(const char * message, ErrorFlags flags, const IDecimal & decimal) 
+			: std::runtime_error(message), flags(flags), decimal(decimal) {}
+	};
+	
+	struct InvalidException : public Exception { using Exception::Exception; };
+	struct DivideByZeroException : public Exception { using Exception::Exception; };
+	struct OverflowException : public Exception { using Exception::Exception; };
+	struct UnderflowException : public Exception { using Exception::Exception; };
+	struct InexactException : public Exception { using Exception::Exception; };
+	struct MismatchedRoundingException : public std::runtime_error { 
+		const RoundMode mode1;
+		const RoundMode mode2;
+		MismatchedRoundingException(const RoundMode mode1, const RoundMode mode2) :
+			std::runtime_error("Mismatched rounding modes"), mode1(mode1), mode2(mode2) {}
+   	};
+	struct NonDecimalException: public std::runtime_error {
+		const std::string value; 
+		NonDecimalException(const char value) :
+			std::runtime_error("Non-decimal value received"), value(std::string(1, value)) {}
+		NonDecimalException(const char * value) :
+			std::runtime_error("Non-decimal value received"), value(value) {}
+		NonDecimalException(const std::string & value) :
+			std::runtime_error("Non-decimal value received"), value(value) {}
+	};
+};
+
+// Base class for decimal types
+template <class T>
+class DecimalBase : public IDecimal {
 protected:
 	T val; // either D64 or D128
 
@@ -183,7 +218,9 @@ protected:
 	std::function<int16_t(T, ErrorFlags*)> to_int16_xrnint;
 	std::function<int32_t(T, ErrorFlags*)> to_int32_xrnint;
 	std::function<int64_t(T, ErrorFlags*)> to_int64_xrnint;
-	std::function<int(T)> is_signed;
+	std::function<int(T)> _is_signed;
+	std::function<int(T)> _is_normal;
+	std::function<int(T)> _is_zero;
 	std::function<int(T, T, ErrorFlags*)> quiet_equal;
 	std::function<int(T, T, ErrorFlags*)> quiet_less;
 	std::function<T(T, ErrorFlags *)> round_integral_zero;
@@ -244,11 +281,15 @@ protected:
 			this->val = new char[s.length() + 1];
 			strcpy(this->val, s.c_str());
 		}
+		cstr(const char * c) {
+			this->val = new char[strlen(c) + 1];
+			strcpy(this->val, c);
+		}
 		~cstr() {
 			delete[] this->val;
 		}
 	};
-
+	
 	// used by derived classes to set the rounding mode
 	DecimalBase(const RoundMode & round_mode = Round::NearestEven) : _round_mode(round_mode) {}
 	
@@ -290,29 +331,7 @@ protected:
 		return result;
 	}
 	
-public:	 
-	struct Exception : public std::runtime_error {
-		const ErrorFlags flags;
-		const DecimalBase & decimal;
-
-		Exception(const std::string & message, ErrorFlags flags, const DecimalBase & decimal) 
-			: std::runtime_error(message), flags(flags), decimal(decimal) {}
-		Exception(const char * message, ErrorFlags flags, const DecimalBase & decimal) 
-			: std::runtime_error(message), flags(flags), decimal(decimal) {}
-	};
-	
-	struct InvalidException : public Exception { using Exception::Exception; };
-	struct DivideByZeroException : public Exception { using Exception::Exception; };
-	struct OverflowException : public Exception { using Exception::Exception; };
-	struct UnderflowException : public Exception { using Exception::Exception; };
-	struct InexactException : public Exception { using Exception::Exception; };
-	struct MismatchedRoundingException : public std::runtime_error { 
-		const RoundMode mode1;
-		const RoundMode mode2;
-		MismatchedRoundingException(const RoundMode mode1, const RoundMode mode2) :
-			std::runtime_error("Mismatched rounding modes"), mode1(mode1), mode2(mode2) {}
-   	};
-	
+public:	 	
 	void throw_on(const Error & error) { this->_throw |= error; }
 	void throw_off(const Error & error) { this->_throw ^= error; }
 
@@ -378,9 +397,16 @@ public:
 		return s.substr(start, count);
 	}
 	
-	// true if this decimal < 0	
 	const bool is_negative() const {
-		return (this->is_signed(this->val) > 0);
+		return (this->_is_signed(this->val) > 0);
+	}
+	
+	const bool is_normal() const {
+		return (this->_is_normal(this->val) > 0);
+	}
+	
+	const bool is_zero() const {
+		return (this->_is_zero(this->val) > 0);
 	}
 	
 	// == operators to convert to native types == //
@@ -540,28 +566,37 @@ public:
 	
 	LongDecimal(const unsigned char value, const RoundMode round_mode = Round::NearestEven) 
 		: LongDecimal((unsigned int) value, round_mode) {}
+
 	LongDecimal(const unsigned short value, const RoundMode round_mode = Round::NearestEven) 
 		: LongDecimal((unsigned int) value, round_mode) {}
+
 	LongDecimal(const unsigned int value, const RoundMode round_mode = Round::NearestEven) 
 		: DecimalBase(round_mode) { 
 			this->attach_bid_functions();
 			this->val = this->from_uint32(value); 
 	}
+
 	LongDecimal(const unsigned long value, const RoundMode round_mode = Round::NearestEven) 
 		: LongDecimal((unsigned long long) value, round_mode) {}
+
 	LongDecimal(const unsigned long long value, const RoundMode round_mode = Round::NearestEven) 
 		: DecimalBase(round_mode) { 
 			this->attach_bid_functions();
 			this->val = this->from_uint64(value); 
 	}
 	
-	LongDecimal(const char value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((int) value, round_mode) {}
+	LongDecimal(const char value, const RoundMode round_mode = Round::NearestEven) 
+		: LongDecimal((int) value, round_mode) {}
+
 	LongDecimal(const short value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((int) value, round_mode) {}
+
 	LongDecimal(const int value, const RoundMode round_mode = Round::NearestEven) : DecimalBase(round_mode) {
 		this->attach_bid_functions();
 		this->val = this->from_int32(value); 
 	}
+
 	LongDecimal(const long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((long long) value, round_mode) {}
+
 	LongDecimal(const long long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal(round_mode) { 
 		this->attach_bid_functions();
 		this->val = this->from_int64(value); 
@@ -571,7 +606,16 @@ public:
 		: DecimalBase(round_mode) {
 		this->attach_bid_functions();
 		auto val = value.empty()? "0" : value;
-		cstr c(val);
+		auto c = cstr( (value.empty()? "0" : value.c_str()) );
+		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->from_string(c.val, this->_round_mode, flags);
+		});
+	}
+	
+	LongDecimal(const char * value, const RoundMode round_mode = Round::NearestEven) 
+		: DecimalBase(round_mode) {
+		this->attach_bid_functions();
+		auto c = cstr( (strlen(value) == 0? "0" : value) );
 		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
 			return this->from_string(c.val, this->_round_mode, flags);
 		});
@@ -592,7 +636,9 @@ public:
 		this->to_int16_xrnint = bid128_to_int16_xrnint;
 		this->to_int32_xrnint = bid128_to_int32_xrnint;
 		this->to_int64_xrnint = bid128_to_int64_xrnint;
-		this->is_signed = bid128_isSigned;
+		this->_is_signed = bid128_isSigned;
+		this->_is_normal = bid128_isNormal;
+		this->_is_zero = bid128_isZero;
 		this->quiet_equal = bid128_quiet_equal;
 		this->quiet_less = bid128_quiet_less;
 		this->round_integral_zero = bid128_round_integral_zero;

@@ -6,4 +6,5 @@ install_manifest.txt
 CMakeCache.txt
 Makefile
 cmake_install.cmake
-
+include/*.swp
+src/*.swp
