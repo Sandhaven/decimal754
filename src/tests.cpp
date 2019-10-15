@@ -42,6 +42,14 @@ LongDecimal ten("10");
 
 typedef LongDecimal d;
 std::random_device rd;
+	
+vector<IDecimal::Round> round_modes = {
+	IDecimal::Round::NearestEven,
+	IDecimal::Round::NearestAway,
+	IDecimal::Round::Upward,
+	IDecimal::Round::Downward,
+	IDecimal::Round::TowardZero
+};
 
 const int LOOP_SIZE = 100;
 
@@ -105,8 +113,6 @@ TEST_CASE( "Constants", "[constants]" ) {
 	}
 }
 
-// TODO: Constructor rounding mode
-
 TEST_CASE( "Null constructor", "[null constructor]" ) {
 	SECTION("Null Constructor") {
 		REQUIRE_NOTHROW(d());
@@ -117,69 +123,13 @@ TEST_CASE( "Null constructor", "[null constructor]" ) {
 		REQUIRE( a.is_zero() );
 		REQUIRE( static_cast<int>(a) == 0);
 		REQUIRE( a.str() == "0");
-	}
-}
-
-TEST_CASE( "Constructors: chars", "[constructors][char]" ) {
-	
-	SECTION("Constructor: unsigned char") {
-		auto min = numeric_limits<unsigned char>::min();
-		auto max = numeric_limits<unsigned char>::max();
-
-		REQUIRE_NOTHROW(d(static_cast<unsigned char>('5')));
-		REQUIRE_NOTHROW(d(static_cast<unsigned char>('a'))); // non-digits are specifically allowed
-
-		for (int i=min; i < max; ++i) {
-			auto a = d(static_cast<unsigned char>(i));
-			REQUIRE( a.errors() == IDecimal::Error::None );
-			REQUIRE( static_cast<int>(a) == i);
-			REQUIRE( a.str() == to_string(i));
-
-			if (i == 0) {
-				REQUIRE( a.is_zero() );
-				REQUIRE( !a.is_normal() );
-			} else {
-				REQUIRE( !a.is_zero() );
-				REQUIRE( a.is_normal() );
-			}
-
-			REQUIRE( !a.is_negative() );
-		}
-	}
-	
-	SECTION("Constructor: char") {
-		auto min = numeric_limits<char>::min();
-		auto max = numeric_limits<char>::max();
-
-		REQUIRE_NOTHROW(d(static_cast<char>('5')));
-		REQUIRE_NOTHROW(d(static_cast<char>('a'))); // non-digits are specifically allowed
-
-		for (int i=min; i < max; ++i) {
-			auto a = d(static_cast<char>(i));
-			REQUIRE( a.errors() == IDecimal::Error::None );
-			REQUIRE( static_cast<char>(a) == i);
-			REQUIRE( a.str() == to_string(i));
-
-			if (i == 0) {
-				REQUIRE( a.is_zero() );
-				REQUIRE( !a.is_normal() );
-			} else {
-				REQUIRE( !a.is_zero() );
-				REQUIRE( a.is_normal() );
-			}
-
-			if (i >= 0) {
-				REQUIRE( !a.is_negative() );
-			} else {
-				REQUIRE( a.is_negative() );
-			}
-		}
+		REQUIRE( a.round_mode() == IDecimal::Round::NearestEven );
 	}
 }
 
 TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]", 
-	unsigned short, unsigned int, unsigned long, unsigned long long,
-	short, int, long, long long) {
+	unsigned char, unsigned short, unsigned int, unsigned long, unsigned long long,
+	char, short, int, long, long long) {
     	
 	std::mt19937_64 gen(rd());
 	auto min = numeric_limits<TestType>::min();
@@ -193,6 +143,7 @@ TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]",
 		REQUIRE( A.errors() == IDecimal::Error::None );
 		REQUIRE( static_cast<TestType>(A) == a);
 		REQUIRE( A.str() == to_string(a));
+		REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 		if (a == 0) {
 			REQUIRE( A.is_zero() );
@@ -206,6 +157,11 @@ TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]",
 			REQUIRE( !A.is_negative() );
 		} else {
 			REQUIRE( A.is_negative() );
+		}
+	
+		for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
+			auto b = d(a, *m);
+			REQUIRE( b.round_mode() == *m );
 		}
 	}
 }
@@ -224,6 +180,7 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			auto A = d(a);
 			REQUIRE( A.errors() == IDecimal::Error::None );
 			REQUIRE( A.str() == a);
+			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 			if (a == "0") {
 				REQUIRE( A.is_zero() );
@@ -238,6 +195,11 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			} else {
 				REQUIRE( A.is_negative() );
 			}
+
+			for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
+				auto b = d(a, *m);
+				REQUIRE( b.round_mode() == *m );
+			}
 		}
 	}	
 
@@ -250,6 +212,7 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			auto A = d(a);
 			REQUIRE( A.errors() == IDecimal::Error::None );
 			REQUIRE( A.str() == a);
+			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 			if (strcmp(a, "0") == 0) {
 				REQUIRE( A.is_zero() );
@@ -263,6 +226,11 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 				REQUIRE( !A.is_negative() );
 			} else {
 				REQUIRE( A.is_negative() );
+			}
+			
+			for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
+				auto b = d(a, *m);
+				REQUIRE( b.round_mode() == *m );
 			}
 		}
 	}	

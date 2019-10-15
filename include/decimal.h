@@ -336,6 +336,8 @@ public:
 	void throw_off(const Error & error) { this->_throw ^= error; }
 
 	const unsigned int errors() const { return this->_errors; }
+	const unsigned int round_mode() const { return this->_round_mode; }
+
 	const bool divide_by_zero() const { return ((this->_errors & Error::DivideByZero) == Error::DivideByZero); }
 	const bool overflow() const { return ((this->_errors & Error::Overflow)== Error::Overflow); }
 	const bool underflow() const { return ((this->_errors & Error::Underflow) == Error::Underflow); }
@@ -597,7 +599,8 @@ public:
 
 	LongDecimal(const long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((long long) value, round_mode) {}
 
-	LongDecimal(const long long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal(round_mode) { 
+	LongDecimal(const long long value, const RoundMode round_mode = Round::NearestEven) 
+		: DecimalBase(round_mode) { 
 		this->attach_bid_functions();
 		this->val = this->from_int64(value); 
 	}			
@@ -762,10 +765,10 @@ public:
 namespace decimal {
 	static Decimal Zero(0);
 	static Decimal One(1);
-	static Decimal Max(std::string("9999999999999999999999999999999999") + "E+6111"); // TODO - WRONG EMAX
-	static Decimal Min(std::string("-9999999999999999999999999999999999") + "E+6111");
-	static Decimal SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
-	static Decimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
+	static Decimal Max(std::string("9999999999999999999999999999999999") + "E+369");
+	static Decimal Min(std::string("-9999999999999999999999999999999999") + "E+369");
+	static Decimal SmallestPositive(std::string("9999999999999999999999999999999999") + "E-398");
+	static Decimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-398");
 	static Decimal Inf("Inf");
 }
 
