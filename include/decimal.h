@@ -37,7 +37,13 @@
 namespace decimal754 {
 
 typedef uint64_t D64; // holds 64-bit decimals
-typedef struct __attribute__((aligned(16))) { uint64_t w[2]; } D128; // holds 128-bit decimals
+
+typedef struct __attribute__((aligned(16))) D128 { 
+	uint64_t w[2]; 
+	friend inline bool operator!=(const D128 & l, const D128 & r) { return !(l == r); }
+	friend inline bool operator==(const D128 & l, const D128 & r) { return (l.w[0] == r.w[0]) && (l.w[1] == r.w[1]); }
+} D128; // holds 128-bit decimals
+
 typedef unsigned int RoundMode;
 typedef unsigned int ErrorFlags;
 
@@ -66,6 +72,8 @@ extern int8_t __bid128_to_int8_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int16_t __bid128_to_int16_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int32_t __bid128_to_int32_xrnint (D128 x, ErrorFlags *pfpsf);
 extern int64_t __bid128_to_int64_xrnint (D128 x, ErrorFlags *pfpsf);
+extern float __bid128_to_binary32 (D128 x, RoundMode rnd_mode, ErrorFlags *pfpsf);
+extern double __bid128_to_binary64 (D128 x, RoundMode rnd_mode, ErrorFlags *pfpsf);
 extern int __bid128_isSigned (D128 x);
 extern int __bid128_isNormal (D128 x);
 extern int __bid128_isZero (D128 x);
@@ -94,6 +102,8 @@ extern int8_t __bid64_to_int8_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int16_t __bid64_to_int16_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int32_t __bid64_to_int32_xrnint (D64 x, ErrorFlags *pfpsf);
 extern int64_t __bid64_to_int64_xrnint (D64 x, ErrorFlags *pfpsf);
+extern float __bid64_to_binary32 (D64 x, RoundMode rnd_mode, ErrorFlags *pfpsf);
+extern double __bid64_to_binary64 (D64 x, RoundMode rnd_mode, ErrorFlags *pfpsf);
 extern int __bid64_isSigned (D64 x);
 extern int __bid64_isNormal (D128 x);
 extern int __bid64_isZero (D64 x);
@@ -125,12 +135,12 @@ public:
 	
 	struct Exception : public std::runtime_error {
 		const ErrorFlags flags;
-		const IDecimal & decimal;
+		const IDecimal * decimal;
 
-		Exception(const std::string & message, ErrorFlags flags, const IDecimal & decimal) 
+		Exception(const std::string & message, ErrorFlags flags = Error::None, const IDecimal * decimal = nullptr) 
 			: std::runtime_error(message), flags(flags), decimal(decimal) {}
-		Exception(const char * message, ErrorFlags flags, const IDecimal & decimal) 
-			: std::runtime_error(message), flags(flags), decimal(decimal) {}
+		Exception(const char * message, ErrorFlags flags = Error::None, const IDecimal * decimal = nullptr) 
+			: Exception(std::string(message), flags, decimal) {}
 	};
 	
 	struct InvalidException : public Exception { using Exception::Exception; };
@@ -158,29 +168,45 @@ public:
 // Base class for decimal types
 template <class T>
 class DecimalBase : public IDecimal {
+private:
+	// cached variables
+	char * _c_str = nullptr;
+	char * _c_sci = nullptr;
+	std::string _str = std::string();
+	std::string _sci = std::string();
 protected:
-	T val; // either D64 or D128
+	T _val; // either D64 or D128
+	void _set_val(T val) {
+		if (val != this->_val) {
+			this->_val = val;
+			this->_c_str = nullptr;
+			this->_c_sci = nullptr;
+			this->_str = std::string();
+			this->_sci = std::string();
+		}
+	}
 
 	RoundMode _round_mode = Round::NearestEven;
 	ErrorFlags _errors = Error::None;
 	ErrorFlags _throw = Error::None;
+	unsigned int _precision = -1;
 	
 	// throws an exception if an invalid operation occurred	
 	void check_flags(const ErrorFlags flags) const { 
 		if ((flags & Error::Invalid) == Error::Invalid) {
-			throw DecimalBase::InvalidException("Invalid decimal operation", flags, *this);
+			throw DecimalBase::InvalidException("Invalid decimal operation", flags, this);
 		} else if ((flags & Error::DivideByZero) == Error::DivideByZero && 
 			(this->_throw & Error::DivideByZero) == Error::DivideByZero) {
-			throw DecimalBase::DivideByZeroException("Attempt to divide by zero", flags, *this);
+			throw DecimalBase::DivideByZeroException("Attempt to divide by zero", flags, this);
 		} else if ((flags & Error::Overflow) == Error::Overflow && 
 			(this->_throw & Error::Overflow) == Error::Overflow) {
-			throw DecimalBase::OverflowException("Overflow", flags, *this);
+			throw DecimalBase::OverflowException("Overflow", flags, this);
 		} else if ((flags & Error::Underflow) == Error::Underflow && 
 			(this->_throw & Error::Underflow) == Error::Underflow) {
-			throw DecimalBase::UnderflowException("Underflow", flags, *this);
+			throw DecimalBase::UnderflowException("Underflow", flags, this);
 		} else if ((flags & Error::Inexact) == Error::Inexact && 
 			(this->_throw & Error::Inexact) == Error::Inexact) {
-			throw DecimalBase::InexactException("Inexact", flags, *this);
+			throw DecimalBase::InexactException("Inexact", flags, this);
 		}
 	}
 
@@ -218,6 +244,8 @@ protected:
 	std::function<int16_t(T, ErrorFlags*)> to_int16_xrnint;
 	std::function<int32_t(T, ErrorFlags*)> to_int32_xrnint;
 	std::function<int64_t(T, ErrorFlags*)> to_int64_xrnint;
+	std::function<float(T, RoundMode, ErrorFlags*)> to_binary32;
+	std::function<double(T, RoundMode, ErrorFlags*)> to_binary64;
 	std::function<int(T)> _is_signed;
 	std::function<int(T)> _is_normal;
 	std::function<int(T)> _is_zero;
@@ -291,7 +319,7 @@ protected:
 	};
 	
 	// used by derived classes to set the rounding mode
-	DecimalBase(const RoundMode & round_mode = Round::NearestEven) : _round_mode(round_mode) {}
+	DecimalBase(const unsigned int precision, const RoundMode & round_mode = Round::NearestEven) : _precision(precision), _round_mode(round_mode) {}
 	
 	static const std::string random_str(const short precision, const short emin, const short emax) {
 		// Algorithm derived from IEEE754-2008, Page 8
@@ -332,6 +360,18 @@ protected:
 	}
 	
 public:	 	
+	~DecimalBase() {
+		if (this->_c_str != nullptr) {
+			delete[] this->_c_str;
+			this->_c_str = nullptr;
+		}
+		
+		if (this->_c_sci != nullptr) {
+			delete[] this->_c_sci;
+			this->_c_sci = nullptr;
+		}
+	}
+
 	void throw_on(const Error & error) { this->_throw |= error; }
 	void throw_off(const Error & error) { this->_throw ^= error; }
 
@@ -373,116 +413,204 @@ public:
 		return ss.str();
 	}
 
+	// TODO: TEST
+	const char * c_str() {
+		if (this->_c_str != nullptr) {
+			return this->_c_str;
+		}
+
+		// cache into this->_c_str
+		assert(this->_precision > 0);
+		auto len = this->_precision + 8; // 6 for the exponent, 1 for the sign, 1 for \0
+		this->_c_str = new char[len];
+		this->invoke([&](ErrorFlags * flags) {
+			this->to_string (this->_c_str, this->_val, flags);
+			this->_c_str[len - 1] = '\0'; // in case to_string fails to add one
+		});	
+			
+		assert(this->_c_str != nullptr);
+		return this->_c_str;
+	}
+
+	/*
+
+	// TODO: test
+	const char * c_sci() {
+		if (this->_c_sci != nullptr) {
+			return this->_c_sci;
+		}
+
+		auto buf = this->c_str();
+		auto len = strlen(buf);
+		this->_c_sci = new char[len];
+		auto buf2 = this->_c_sci;
+		assert(len > 3);
+		
+		if (strcmp(&buf[1], "NaN") == 0 ||
+			strcmp(&buf[1], "SNaN") == 0 ||
+			strcmp(&buf[1], "Inf") == 0
+		) {
+			// return special numbers directly
+			strcpy(buf2, buf);
+		} else {
+			// find the first non-zero digit of the significand
+			auto start = 1;
+			while (start < len && buf[start] == '0') { ++start; }
+
+			// find the end of the significand (beginning of the exponent)
+			auto end = len - 1; // the end of the significand
+			while (buf[end+1] != 'E') { --end; }
+			assert(end < len - 1);	// the exponent must exist
+			assert(end > 0);		// there must also be a sign and significand
+			assert(end >= start);	// the end cannot be before the start
+		
+			// compute the exponent	
+			auto exp = atoi(&buf[end+2]); // the value of the exponent
+			
+			// shift the decimal point and adjust the exponent to match
+			int dp = end - start;
+			exp += dp;
+		
+			// rewrite the decimal in scientific notation	
+			buf2[0] = buf[0]; // copy the sign
+			buf2[len-1] = '\0';
+
+			auto dest = (buf[0] == '-'? &buf2[1] : buf2);
+
+			if (dp <= 0) {
+				sprintf(dest, "%cE%+d", buf[start], exp);
+			} else {
+				sprintf(dest, "%c.%.*sE%+d", buf[start], dp, buf + start + 1, exp);
+			}
+		}
+
+		assert(this->_c_sci != nullptr);
+		return this->_c_sci;
+	}
+	*/
+	
 	// converts the decimal to a string
 	// TODO: Inexact strings are ugly
-	const std::string str() const {
-		char buffer[42];
-		buffer[41] = '\0';
-		
-		this->invoke([&](ErrorFlags * flags) {
-			this->to_string (buffer, this->val, flags);
-		});
-
-		std::string s = buffer;
-		auto len = s.length();
-		auto start = 0;
-		auto count = len;
-		
-		if (s[0] == '+') {
-			start += 1;
-		} 
-
-		if (len > 2 && s.substr(len-3, 3) == "E+0") {
-			count = len - 3 - start;
+	// TODO: This seems inefficient
+	// TODO: scientific notation
+	const std::string str() {
+		if (this->_str.empty()) {
+			this->_str = this->c_str();
 		}
-			
-		return s.substr(start, count);
+
+		assert(!this->_str.empty());
+		return this->_str;
 	}
+
+	/*
+	const std::string sci() {
+		if (this->_sci.empty()) {
+			this->_sci = this->c_sci();
+		}
+
+		assert(!this->_sci.empty());
+		return this->_sci;
+	}
+	*/
 	
 	const bool is_negative() const {
-		return (this->_is_signed(this->val) > 0);
+		return (this->_is_signed(this->_val) > 0);
 	}
 	
 	const bool is_normal() const {
-		return (this->_is_normal(this->val) > 0);
+		return (this->_is_normal(this->_val) > 0);
 	}
 	
 	const bool is_zero() const {
-		return (this->_is_zero(this->val) > 0);
+		return (this->_is_zero(this->_val) > 0);
 	}
 	
 	// == operators to convert to native types == //
 	explicit operator unsigned char() const { 
 		return this->invoke<unsigned char>([&](ErrorFlags * flags) {
-			return this->to_uint8_xrnint (this->val, flags);
+			return this->to_uint8_xrnint (this->_val, flags);
 		});
 	}
 	
 	explicit operator unsigned short() const { 
 		return this->invoke<unsigned short>([&](ErrorFlags * flags) {
-			return this->to_uint16_xrnint (this->val, flags);
+			return this->to_uint16_xrnint (this->_val, flags);
 		});
 	}
 
 	explicit operator unsigned int() const { 
 		return this->invoke<unsigned int>([&](ErrorFlags * flags) {
-			return this->to_uint32_xrnint (this->val, flags);
+			return this->to_uint32_xrnint (this->_val, flags);
 		});
 	}
 	
 	explicit operator unsigned long() const { 
 		return this->invoke<unsigned long>([&](ErrorFlags * flags) {
-			return this->to_uint64_xrnint (this->val, flags);
+			return this->to_uint64_xrnint (this->_val, flags);
 		});
 	}
 	
 	explicit operator unsigned long long() const { 
 		return this->invoke<unsigned long long>([&](ErrorFlags * flags) {
-			return this->to_uint64_xrnint (this->val, flags);
+			return this->to_uint64_xrnint (this->_val, flags);
 		});
 	}
 	
 	explicit operator char() const { 
 		return this->invoke<char>([&](ErrorFlags * flags) {
-			return this->to_int8_xrnint (this->val, flags);
+			return this->to_int8_xrnint(this->_val, flags);
 		});
 	}
 	
 	explicit operator short() const { 
 		return this->invoke<short>([&](ErrorFlags * flags) {
-			return this->to_int16_xrnint (this->val, flags);
+			return this->to_int16_xrnint(this->_val, flags);
 		});
 	}
 
 	explicit operator int() const { 
 		return this->invoke<int>([&](ErrorFlags * flags) {
-			return this->to_int32_xrnint (this->val, flags);
+			return this->to_int32_xrnint(this->_val, flags);
 		});
 	}
 	
 	explicit operator long() const { 
 		return this->invoke<long>([&](ErrorFlags * flags) {
-			return this->to_int64_xrnint (this->val, flags);
+			return this->to_int64_xrnint(this->_val, flags);
 		});
 	}
 	
 	explicit operator long long() const { 
 		return this->invoke<long long>([&](ErrorFlags * flags) {
-			return this->to_int64_xrnint (this->val, flags);
+			return this->to_int64_xrnint(this->_val, flags);
+		});
+	}
+	
+	explicit operator float() const { 
+		return this->invoke<float>([&](ErrorFlags * flags) {
+			return this->to_binary32(this->_val, this->_round_mode, flags);
+		});
+	}
+	
+	explicit operator double() const { 
+		return this->invoke<double>([&](ErrorFlags * flags) {
+			return this->to_binary64(this->_val, this->_round_mode, flags);
 		});
 	}
 
 	void truncate() {
-		this->val =  this->invoke<T>([&](ErrorFlags * flags) {
-			return this->round_integral_zero (this->val, flags);
+		auto v = this->invoke<T>([&](ErrorFlags * flags) {
+			return this->round_integral_zero (this->_val, flags);
 		});
+		this->_set_val(v);
 	}
 		
 	// == arithmetic operators == //	
 	void inline add(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_add(this->val, other.val, round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_add(this->_val, other._val, round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 
 	void inline operator+=(const DecimalBase & other) {
@@ -491,54 +619,60 @@ public:
 	}
 	
 	void inline subtract(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_sub(this->val, other.val, round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_sub(this->_val, other._val, round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	void inline operator-=(const DecimalBase & other) {
 		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_sub(this->val, other.val, this->_round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_sub(this->_val, other._val, this->_round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	void inline multiply(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_mul(this->val, other.val, round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_mul(this->_val, other._val, round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	void inline operator*=(const DecimalBase & other) {
 		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_mul(this->val, other.val, this->_round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_mul(this->_val, other._val, this->_round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	void inline divide(const DecimalBase & other, const RoundMode round_mode = Round::NearestEven) {
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_div(this->val, other.val, round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_div(this->_val, other._val, round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	void inline operator/=(const DecimalBase & other) {
 		check_rounding(other._round_mode);
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
-			return this->_div(this->val, other.val, this->_round_mode, flags);
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
+			return this->_div(this->_val, other._val, this->_round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 
 	// == comparison operators == //	// TODO
 	friend inline bool operator!=(const DecimalBase & l, const DecimalBase & r) { return !(l == r); }
 	friend inline bool operator==(const DecimalBase & l, const DecimalBase & r) { 
 		ErrorFlags flags = Error::None;
-		auto result = l.quiet_equal (l.val, r.val, &flags);
+		auto result = l.quiet_equal (l._val, r._val, &flags);
 		return result > 0;
 	
 
 		//return (l.invoke<int>([&](ErrorFlags * flags) {
-			//return l.quiet_equal(l.val, r.val, flags);
+			//return l.quiet_equal(l._val, r._val, flags);
 		//}) > 0);
 	}
 
@@ -547,11 +681,11 @@ public:
 	friend inline bool operator>=(const DecimalBase & l, const DecimalBase & r) { return l > r || l == r; }
 	friend inline bool operator<(const DecimalBase & l, const DecimalBase & r) {
 		ErrorFlags flags = Error::None;
-		auto result = l.quiet_less (l.val, r.val, &flags);
+		auto result = l.quiet_less (l._val, r._val, &flags);
 		return result > 0;
 	}
 		
-	friend inline std::ostream& operator<<(std::ostream& stream, const DecimalBase & decimal) {
+	friend inline std::ostream& operator<<(std::ostream& stream, DecimalBase & decimal) {
 		stream << decimal.str();
 		return stream;
 	}	
@@ -573,18 +707,20 @@ public:
 		: LongDecimal((unsigned int) value, round_mode) {}
 
 	LongDecimal(const unsigned int value, const RoundMode round_mode = Round::NearestEven) 
-		: DecimalBase(round_mode) { 
+		: DecimalBase(LongDecimal::precision, round_mode) { 
 			this->attach_bid_functions();
-			this->val = this->from_uint32(value); 
+			auto v = this->from_uint32(value); 
+			this->_set_val(v);
 	}
 
 	LongDecimal(const unsigned long value, const RoundMode round_mode = Round::NearestEven) 
 		: LongDecimal((unsigned long long) value, round_mode) {}
 
 	LongDecimal(const unsigned long long value, const RoundMode round_mode = Round::NearestEven) 
-		: DecimalBase(round_mode) { 
+		: DecimalBase(LongDecimal::precision, round_mode) { 
 			this->attach_bid_functions();
-			this->val = this->from_uint64(value); 
+			auto v = this->from_uint64(value); 
+			this->_set_val(v);
 	}
 	
 	LongDecimal(const char value, const RoundMode round_mode = Round::NearestEven) 
@@ -592,38 +728,42 @@ public:
 
 	LongDecimal(const short value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((int) value, round_mode) {}
 
-	LongDecimal(const int value, const RoundMode round_mode = Round::NearestEven) : DecimalBase(round_mode) {
+	LongDecimal(const int value, const RoundMode round_mode = Round::NearestEven) : DecimalBase(LongDecimal::precision, round_mode) {
 		this->attach_bid_functions();
-		this->val = this->from_int32(value); 
+		auto v = this->from_int32(value); 
+		this->_set_val(v);
 	}
 
 	LongDecimal(const long value, const RoundMode round_mode = Round::NearestEven) : LongDecimal((long long) value, round_mode) {}
 
 	LongDecimal(const long long value, const RoundMode round_mode = Round::NearestEven) 
-		: DecimalBase(round_mode) { 
+		: DecimalBase(LongDecimal::precision, round_mode) { 
 		this->attach_bid_functions();
-		this->val = this->from_int64(value); 
+		auto v = this->from_int64(value); 
+		this->_set_val(v);
 	}			
 	
 	LongDecimal(const std::string & value, const RoundMode round_mode = Round::NearestEven) 
-		: DecimalBase(round_mode) {
+		: DecimalBase(LongDecimal::precision, round_mode) {
 		this->attach_bid_functions();
 		auto val = value.empty()? "0" : value;
 		auto c = cstr( (value.empty()? "0" : value.c_str()) );
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
 			return this->from_string(c.val, this->_round_mode, flags);
 		});
+		this->_set_val(v);
 	}
 	
 	LongDecimal(const char * value, const RoundMode round_mode = Round::NearestEven) 
-		: DecimalBase(round_mode) {
+		: DecimalBase(LongDecimal::precision, round_mode) {
 		this->attach_bid_functions();
 		auto c = cstr( (strlen(value) == 0? "0" : value) );
-		this->val = this->invoke<D128>([&](ErrorFlags * flags) {
+		auto v = this->invoke<D128>([&](ErrorFlags * flags) {
 			return this->from_string(c.val, this->_round_mode, flags);
 		});
+		this->_set_val(v);
 	}
-
+	
 	void attach_bid_functions() override {
 		this->from_string = bid128_from_string;
 		this->from_uint32 = bid128_from_uint32;
@@ -639,6 +779,8 @@ public:
 		this->to_int16_xrnint = bid128_to_int16_xrnint;
 		this->to_int32_xrnint = bid128_to_int32_xrnint;
 		this->to_int64_xrnint = bid128_to_int64_xrnint;
+		this->to_binary32 = bid128_to_binary32;
+		this->to_binary64 = bid128_to_binary64;
 		this->_is_signed = bid128_isSigned;
 		this->_is_normal = bid128_isNormal;
 		this->_is_zero = bid128_isZero;
@@ -652,7 +794,9 @@ public:
 		this->_mul = bid128_mul;
 		this->_div = bid128_div;
 
-		this->val = this->from_uint64(0);
+		// TODO: remove
+		//auto v = this->from_uint64(0);
+		//this->_set_val(v);
 	}
 	
 	friend inline LongDecimal truncate(const LongDecimal & v) {
@@ -663,13 +807,13 @@ public:
 		
 	friend inline LongDecimal abs(const LongDecimal & v) {
 		LongDecimal v2 = v;
-		v2.val = v.abs(v2.val);
+		v2._set_val(v.abs(v2._val));
 		return v2;
 	}	
 
 	friend inline LongDecimal operator-(const LongDecimal & v) {
 		LongDecimal v2 = v;
-		v2.val = v.negate(v2.val);
+		v2._set_val(v.negate(v2._val));
 		return v2;
 	}	
 
@@ -729,7 +873,7 @@ public:
 		return LongDecimal(result);
 	};	
 };
-
+/*
 class Decimal : public DecimalBase<D64> {
 public:		
 	static const short precision = 16;
@@ -771,6 +915,7 @@ namespace decimal {
 	static Decimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-398");
 	static Decimal Inf("Inf");
 }
+*/
 
 namespace longDecimal {
 	static LongDecimal Zero(0);

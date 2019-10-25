@@ -26,6 +26,8 @@
 #include "decimal.h"
 #include "catch.hpp"
 
+#include <charconv>
+
 using namespace decimal754;
 using namespace std;
 
@@ -81,6 +83,10 @@ static const vector<LongDecimal> B() {
 	return b;
 }
 
+//TEST_CASE("Temp", "[temp]") {
+	//exit(0);
+//}
+
 TEST_CASE( "Constants", "[constants]" ) {
 	SECTION("Values") {
 		REQUIRE( longDecimal::Zero == d(0) );
@@ -122,7 +128,7 @@ TEST_CASE( "Null constructor", "[null constructor]" ) {
 		REQUIRE( !a.is_normal() );
 		REQUIRE( a.is_zero() );
 		REQUIRE( static_cast<int>(a) == 0);
-		REQUIRE( a.str() == "0");
+		REQUIRE( a.str() == "+0E+0");
 		REQUIRE( a.round_mode() == IDecimal::Round::NearestEven );
 	}
 }
@@ -134,15 +140,15 @@ TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]",
 	std::mt19937_64 gen(rd());
 	auto min = numeric_limits<TestType>::min();
 	auto max = numeric_limits<TestType>::max();
+	auto dist = uniform_int_distribution<TestType>(min, max);
 
 	REQUIRE_NOTHROW(d(static_cast<TestType>('5')));
 
 	for (int i=0; i < LOOP_SIZE; ++i) {
-		auto a = uniform_int_distribution<TestType>(min, max)(gen);
+		auto a = dist(gen);
 		auto A = d(a);
 		REQUIRE( A.errors() == IDecimal::Error::None );
 		REQUIRE( static_cast<TestType>(A) == a);
-		REQUIRE( A.str() == to_string(a));
 		REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 		if (a == 0) {
@@ -170,16 +176,49 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 	std::mt19937_64 gen(rd());
 	auto min = numeric_limits<uint64_t>::min();
 	auto max = numeric_limits<uint64_t>::max();
+	auto dist = uniform_int_distribution<uint64_t>(min, max);
+	
+	SECTION("const char *") {
+		REQUIRE_NOTHROW(d("5"));
 
+		for (int i=0; i < LOOP_SIZE; ++i) {
+			auto l = dist(gen);
+			const char * a = to_string(l).c_str();
+			auto A = d(a);
+			REQUIRE( A.errors() == IDecimal::Error::None );
+			REQUIRE( static_cast<uint64_t>(A) == l);
+			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
+
+			if (strcmp(a, "0") == 0) {
+				REQUIRE( A.is_zero() );
+				REQUIRE( !A.is_normal() );
+			} else {
+				REQUIRE( !A.is_zero() );
+				REQUIRE( A.is_normal() );
+			}
+
+			if (l >= 0) {
+				REQUIRE( !A.is_negative() );
+			} else {
+				REQUIRE( A.is_negative() );
+			}
+
+			for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
+				auto b = d(a, *m);
+				REQUIRE( b.round_mode() == *m );
+			}
+		}
+	}	
+	
 	SECTION("std::string") {
 		REQUIRE_NOTHROW(d(std::string("5")));
 
 		for (int i=0; i < LOOP_SIZE; ++i) {
-			auto l = uniform_int_distribution<uint64_t>(min, max)(gen);
+			auto l = dist(gen);
 			std::string a = to_string(l);
 			auto A = d(a);
 			REQUIRE( A.errors() == IDecimal::Error::None );
-			REQUIRE( A.str() == a);
+			REQUIRE( static_cast<uint64_t>(A) == l);
 			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 			if (a == "0") {
@@ -202,39 +241,284 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			}
 		}
 	}	
-
-	SECTION("const char *") {
-		REQUIRE_NOTHROW(d("5"));
-
-		for (int i=0; i < LOOP_SIZE; ++i) {
-			auto l = uniform_int_distribution<uint64_t>(min, max)(gen);
-			const char * a = to_string(l).c_str();
-			auto A = d(a);
-			REQUIRE( A.errors() == IDecimal::Error::None );
-			REQUIRE( A.str() == a);
-			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
-
-			if (strcmp(a, "0") == 0) {
-				REQUIRE( A.is_zero() );
-				REQUIRE( !A.is_normal() );
-			} else {
-				REQUIRE( !A.is_zero() );
-				REQUIRE( A.is_normal() );
-			}
-			
-			if (l >= 0) {
-				REQUIRE( !A.is_negative() );
-			} else {
-				REQUIRE( A.is_negative() );
-			}
-			
-			for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
-				auto b = d(a, *m);
-				REQUIRE( b.round_mode() == *m );
-			}
-		}
-	}	
 }
+
+TEMPLATE_TEST_CASE( "Integer conversions", "[conversions][integers]", 
+	unsigned char, unsigned short, unsigned int, unsigned long, unsigned long long,
+	char, short, int, long, long long) {
+
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<TestType>::min();
+	auto max = numeric_limits<TestType>::max();
+	auto dist = uniform_int_distribution<TestType>(min, max);
+
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		TestType a = dist(gen);
+		auto A = d(a);
+		REQUIRE( static_cast<TestType>(A) == a );
+	}
+}
+
+TEMPLATE_TEST_CASE( "Floating conversions", "[conversions][floating]", float, double) {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<TestType>::min();
+	auto max = numeric_limits<TestType>::max();
+	auto dist = uniform_int_distribution<TestType>(min, max);
+
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		TestType a = dist(gen);
+		auto A = d(to_string(a));
+		REQUIRE( static_cast<TestType>(A) == a );
+	}
+}
+
+TEST_CASE("String Conversion", "[conversions][strings]") {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<long long>::min();
+	auto max = numeric_limits<long long>::max();
+	auto dist = uniform_int_distribution<long long>(min, max);
+	
+	SECTION("Special cases") {
+		SECTION("str()") {
+			REQUIRE(d("NaN").str() == string("+NaN"));
+			REQUIRE(d("+NaN").str() == string("+NaN"));
+			REQUIRE(d("-NaN").str() == string("-NaN"));
+			REQUIRE(d("nan").str() == string("+NaN"));
+			REQUIRE(d("-nan").str() == string("-NaN"));
+			REQUIRE(d("SNaN").str() == string("+SNaN"));
+			REQUIRE(d("+SNaN").str() == string("+SNaN"));
+			REQUIRE(d("-SNaN").str() == string("-SNaN"));
+			REQUIRE(d("snan").str() == string("+SNaN"));
+			REQUIRE(d("-snan").str() == string("-SNaN"));
+			REQUIRE(d("Inf").str() == string("+Inf"));
+			REQUIRE(d("+Inf").str() == string("+Inf"));
+			REQUIRE(d("-Inf").str() == string("-Inf"));
+			REQUIRE(d("inf").str() == string("+Inf"));
+			REQUIRE(d("-inf").str() == string("-Inf"));
+		}
+
+		SECTION("c_str()") {
+			REQUIRE(strcmp(d("NaN").c_str(), "+NaN") == 0);
+			REQUIRE(strcmp(d("+NaN").c_str(), "+NaN") == 0);
+			REQUIRE(strcmp(d("-NaN").c_str(), "-NaN") == 0);
+			REQUIRE(strcmp(d("nan").c_str(), "+NaN") == 0);
+			REQUIRE(strcmp(d("-nan").c_str(), "-NaN") == 0);
+			REQUIRE(strcmp(d("SNaN").c_str(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("+SNaN").c_str(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("-SNaN").c_str(), "-SNaN") == 0);
+			REQUIRE(strcmp(d("snan").c_str(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("-snan").c_str(), "-SNaN") == 0);
+			REQUIRE(strcmp(d("Inf").c_str(), "+Inf") == 0);
+			REQUIRE(strcmp(d("+Inf").c_str(), "+Inf") == 0);
+			REQUIRE(strcmp(d("-Inf").c_str(), "-Inf") == 0);
+			REQUIRE(strcmp(d("inf").c_str(), "+Inf") == 0);
+			REQUIRE(strcmp(d("-inf").c_str(), "-Inf") == 0);
+		}
+	}
+
+	SECTION("Zero") {
+		SECTION("str()") {
+			REQUIRE(d(0).str() == "+0E+0");
+			REQUIRE(d("00000").str() == "+0E+0");
+			REQUIRE(d(-0).str() == "+0E+0");
+			REQUIRE(d("-00000").str() == "-0E+0");
+		}
+		
+		SECTION("c_str()") {
+			REQUIRE(strcmp(d(0).c_str(), "+0E+0") == 0);
+			REQUIRE(strcmp(d("00000").c_str(), "+0E+0") == 0);
+			REQUIRE(strcmp(d(-0).c_str(), "+0E+0") == 0);
+			REQUIRE(strcmp(d("-00000").c_str(), "-0E+0") == 0);
+		}
+	}
+	
+	SECTION("One") {
+		SECTION("str()") {
+			REQUIRE(d(1).str() == "+1E+0");
+			REQUIRE(d(-1).str() == "-1E+0");
+		}
+		
+		SECTION("c_str()") {
+			REQUIRE(strcmp(d(1).c_str(), "+1E+0") == 0);
+			REQUIRE(strcmp(d(-1).c_str(), "-1E+0") == 0);
+		}
+	}
+
+	SECTION("str() for integers") { 
+		for (int i=0; i < LOOP_SIZE; ++i) {
+			auto l = dist(gen);
+			
+			string a = to_string(l);
+			auto A = d(a);
+			auto B = d(A.str());
+			auto C = d(A.c_str());
+
+			// are std::string and decimal::str convertible?
+			REQUIRE( A == B );
+			REQUIRE( A.str() == B.str() );
+			REQUIRE( B.str() == C.str() );
+			REQUIRE( strcmp(A.c_str(), B.c_str()) == 0);
+			REQUIRE( strcmp(B.c_str(), C.c_str()) == 0);
+
+			// can we recover std::string from a decimal constructed from decimal::str?
+			auto c = static_cast<long long>(B);
+			REQUIRE( to_string(c) == a );
+		}
+	}
+
+	SECTION("str() for rationals") { 
+		for (int i=0; i < LOOP_SIZE; ++i) {
+			auto num = dist(gen);
+			auto denom = dist(gen);
+			if (denom == 0) {
+				continue;
+			}
+			
+			auto A = d(num) / d(denom);
+			if (A.overflow() || A.underflow()) {
+				continue;
+			}
+			
+			auto B = d(A.str());
+			auto C = d(A.c_str());
+
+			// are std::string and decimal::str convertible?
+			REQUIRE( A == B );
+			REQUIRE( A.str() == B.str() );
+			REQUIRE( B.str() == C.str() );
+			REQUIRE( strcmp(A.c_str(), B.c_str()) == 0);
+			REQUIRE( strcmp(B.c_str(), C.c_str()) == 0);
+
+			// can we convert decimal::str to double?
+			REQUIRE( static_cast<double>(B) == std::stod(B.str()) ); 
+		}
+	}
+}
+
+/*
+TEST_CASE("Scientific notation", "[conversions][sci]") {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<long long>::min();
+	auto max = numeric_limits<long long>::max();
+	auto dist = uniform_int_distribution<long long>(min, max);
+	
+	SECTION("Special cases") {
+		SECTION("sci()") {
+			REQUIRE(d("NaN").sci() == string("+NaN"));
+			REQUIRE(d("+NaN").sci() == string("+NaN"));
+			REQUIRE(d("-NaN").sci() == string("-NaN"));
+			REQUIRE(d("nan").sci() == string("+NaN"));
+			REQUIRE(d("-nan").sci() == string("-NaN"));
+			REQUIRE(d("SNaN").sci() == string("+SNaN"));
+			REQUIRE(d("+SNaN").sci() == string("+SNaN"));
+			REQUIRE(d("-SNaN").sci() == string("-SNaN"));
+			REQUIRE(d("snan").sci() == string("+SNaN"));
+			REQUIRE(d("-snan").sci() == string("-SNaN"));
+			REQUIRE(d("Inf").sci() == string("+Inf"));
+			REQUIRE(d("+Inf").sci() == string("+Inf"));
+			REQUIRE(d("-Inf").sci() == string("-Inf"));
+			REQUIRE(d("inf").sci() == string("+Inf"));
+			REQUIRE(d("-inf").sci() == string("-Inf"));
+		}
+
+		SECTION("c_sci()") {
+			REQUIRE(strcmp(d("NaN").c_sci(), "+NaN") == 0);
+			REQUIRE(strcmp(d("+NaN").c_sci(), "+NaN") == 0);
+			REQUIRE(strcmp(d("-NaN").c_sci(), "-NaN") == 0);
+			REQUIRE(strcmp(d("nan").c_sci(), "+NaN") == 0);
+			REQUIRE(strcmp(d("-nan").c_sci(), "-NaN") == 0);
+			REQUIRE(strcmp(d("SNaN").c_sci(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("+SNaN").c_sci(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("-SNaN").c_sci(), "-SNaN") == 0);
+			REQUIRE(strcmp(d("snan").c_sci(), "+SNaN") == 0);
+			REQUIRE(strcmp(d("-snan").c_sci(), "-SNaN") == 0);
+			REQUIRE(strcmp(d("Inf").c_sci(), "+Inf") == 0);
+			REQUIRE(strcmp(d("+Inf").c_sci(), "+Inf") == 0);
+			REQUIRE(strcmp(d("-Inf").c_sci(), "-Inf") == 0);
+			REQUIRE(strcmp(d("inf").c_sci(), "+Inf") == 0);
+			REQUIRE(strcmp(d("-inf").c_sci(), "-Inf") == 0);
+		}
+	}
+
+	SECTION("Zero") {
+		SECTION("sci()") {
+			REQUIRE(d(0).sci() == "0E+0");
+			REQUIRE(d("00000").sci() == "0E+0");
+			REQUIRE(d(-0).sci() == "0E+0");
+			REQUIRE(d("-00000").sci() == "0E+0");
+		}
+		
+		SECTION("c_sci()") {
+			REQUIRE(strcmp(d(0).c_sci(), "0E+0") == 0);
+			REQUIRE(strcmp(d("00000").c_sci(), "0E+0") == 0);
+			REQUIRE(strcmp(d(-0).c_sci(), "0E+0") == 0);
+			REQUIRE(strcmp(d("-00000").c_sci(), "0E+0") == 0);
+		}
+	}
+	
+	SECTION("One") {
+		SECTION("sci()") {
+			REQUIRE(d(1).sci() == "1E+0");
+			REQUIRE(d(-1).sci() == "-1E+0");
+		}
+		
+		SECTION("c_sci()") {
+			REQUIRE(strcmp(d(1).c_sci(), "1E+0") == 0);
+			REQUIRE(strcmp(d(-1).c_sci(), "-1E+0") == 0);
+		}
+	}
+
+	SECTION("sci() for integers") { 
+		for (int i=0; i < LOOP_SIZE; ++i) {
+			auto l = dist(gen);
+			
+			string a = to_string(l);
+			auto A = d(a);
+			auto B = d(A.sci());
+			auto C = d(A.c_sci());
+
+			// are std::string and decimal::sci convertible?
+			REQUIRE( A == B );
+			REQUIRE( A.sci() == B.sci() );
+			REQUIRE( B.sci() == C.sci() );
+			REQUIRE( strcmp(A.c_sci(), B.c_sci()) == 0);
+			REQUIRE( strcmp(B.c_sci(), C.c_sci()) == 0);
+
+			// can we recover std::string from a decimal constructed from decimal::sci?
+			auto c = static_cast<long long>(B);
+			REQUIRE( to_string(c) == a );
+		}
+	}
+
+	SECTION("sci() for rationals") { 
+		for (int i=0; i < LOOP_SIZE; ++i) {
+			auto num = dist(gen);
+			auto denom = dist(gen);
+			if (denom == 0) {
+				continue;
+			}
+			
+			auto A = d(num) / d(denom);
+			if (A.overflow() || A.underflow()) {
+				continue;
+			}
+			
+			auto B = d(A.sci());
+			auto C = d(A.c_sci());
+
+			// are std::string and decimal::str convertible?
+			REQUIRE( A == B );
+			REQUIRE( A.sci() == B.sci() );
+			REQUIRE( B.sci() == C.sci() );
+			REQUIRE( strcmp(A.c_sci(), B.c_sci()) == 0);
+			REQUIRE( strcmp(B.c_sci(), C.c_sci()) == 0);
+
+			// can we convert decimal::str to double?
+			REQUIRE( static_cast<double>(B) == std::stod(B.sci()) ); 
+		}
+	}
+}
+*/
 
 TEST_CASE( "Random Decimals", "[random]" ) {
 	auto a = A();
