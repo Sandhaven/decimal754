@@ -83,9 +83,33 @@ static const vector<LongDecimal> B() {
 	return b;
 }
 
-//TEST_CASE("Temp", "[temp]") {
-	//exit(0);
-//}
+/*
+TEST_CASE("Temp", "[temp]") {
+	try {
+		std::mt19937_64 gen(rd());
+		auto min = numeric_limits<double>::min();
+		auto mx = numeric_limits<double>::max();
+		auto dist = uniform_int_distribution<double>(min, mx);
+
+		double epsilon = 0;
+		for (auto i=0; i < 10; i++) {
+			auto a = dist(gen);
+			auto A = static_cast<float>(d(a));
+			cout << a << endl;
+			cout << A << endl;
+			cout << "===" << endl;
+			continue;
+
+			//auto b = static_cast<double>(A);
+			//auto diff = abs(a - b);
+			//epsilon = max(epsilon, diff);
+		}
+			
+		cout << epsilon << endl;
+	} catch (...) {}
+	exit(0);
+}
+*/
 
 TEST_CASE( "Constants", "[constants]" ) {
 	SECTION("Values") {
@@ -111,29 +135,55 @@ TEST_CASE( "Constants", "[constants]" ) {
 
 		for (auto i = v.begin(); i != v.end(); i++) {
 			for (auto j = v.begin(); j != v.end(); j++) {
-				if (i != j) {
-					REQUIRE( *i != *j );
-				}
+                if (i != j) {
+                    REQUIRE( *i != *j );
+                }
 			}
 		}
 	}
 }
 
 TEST_CASE( "Null constructor", "[null constructor]" ) {
-	SECTION("Null Constructor") {
-		REQUIRE_NOTHROW(d());
-		auto a = d();
-		REQUIRE( a.errors() == IDecimal::Error::None );
-		REQUIRE( !a.is_negative() );
-		REQUIRE( !a.is_normal() );
-		REQUIRE( a.is_zero() );
-		REQUIRE( static_cast<int>(a) == 0);
-		REQUIRE( a.str() == "+0E+0");
-		REQUIRE( a.round_mode() == IDecimal::Round::NearestEven );
+	REQUIRE_NOTHROW(d());
+	auto a = d();
+	REQUIRE( a.errors() == IDecimal::Error::None );
+	REQUIRE( !a.is_negative() );
+	REQUIRE( !a.is_normal() );
+	REQUIRE( a.is_zero() );
+	REQUIRE( static_cast<int>(a) == 0);
+	REQUIRE( a.str() == "+0E+0");
+	REQUIRE( a.round_mode() == IDecimal::Round::NearestEven );
+}
+
+TEST_CASE( "Constructors: Copy", "[copy constructor]" ) {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<int64_t>::min();
+	auto max = numeric_limits<int64_t>::max();
+	auto dist = uniform_int_distribution<int64_t>(min, max);
+
+	auto A = d(-47);
+	auto B = d(A);
+		
+	REQUIRE( static_cast<int64_t>(A) == static_cast<int64_t>(B) );
+	REQUIRE( A.is_negative() == B.is_negative() );
+	REQUIRE( A.is_normal() == B.is_normal() );
+	REQUIRE( A.round_mode() == B.round_mode() );
+	REQUIRE( A.throw_on_err() == B.throw_on_err() );
+
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		auto a = dist(gen);
+		auto A = d(a);
+		auto B = d(A);
+	
+		REQUIRE( static_cast<int64_t>(A) == static_cast<int64_t>(B) );
+		REQUIRE( A.is_negative() == B.is_negative() );
+		REQUIRE( A.is_normal() == B.is_normal() );
+		REQUIRE( A.round_mode() == B.round_mode() );
+		REQUIRE( A.throw_on_err() == B.throw_on_err() );
 	}
 }
 
-TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]", 
+TEMPLATE_TEST_CASE( "Constructors: Integers", "[constructors][integers]", 
 	unsigned char, unsigned short, unsigned int, unsigned long, unsigned long long,
 	char, short, int, long, long long) {
     	
@@ -174,9 +224,9 @@ TEMPLATE_TEST_CASE( "Integers", "[constructors][integers]",
 
 TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 	std::mt19937_64 gen(rd());
-	auto min = numeric_limits<uint64_t>::min();
-	auto max = numeric_limits<uint64_t>::max();
-	auto dist = uniform_int_distribution<uint64_t>(min, max);
+	auto min = numeric_limits<int64_t>::min();
+	auto max = numeric_limits<int64_t>::max();
+	auto dist = uniform_int_distribution<int64_t>(min, max);
 	
 	SECTION("const char *") {
 		REQUIRE_NOTHROW(d("5"));
@@ -186,7 +236,7 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			const char * a = to_string(l).c_str();
 			auto A = d(a);
 			REQUIRE( A.errors() == IDecimal::Error::None );
-			REQUIRE( static_cast<uint64_t>(A) == l);
+			REQUIRE( static_cast<int64_t>(A) == l);
 			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 			if (strcmp(a, "0") == 0) {
@@ -218,7 +268,7 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 			std::string a = to_string(l);
 			auto A = d(a);
 			REQUIRE( A.errors() == IDecimal::Error::None );
-			REQUIRE( static_cast<uint64_t>(A) == l);
+			REQUIRE( static_cast<int64_t>(A) == l);
 			REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
 
 			if (a == "0") {
@@ -243,6 +293,34 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 	}	
 }
 
+TEST_CASE( "Assignment operator", "[assignment operator]" ) {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<int64_t>::min();
+	auto max = numeric_limits<int64_t>::max();
+	auto dist = uniform_int_distribution<int64_t>(min, max);
+
+	auto A = d(-47);
+	auto B = A;
+		
+	REQUIRE( static_cast<int64_t>(A) == static_cast<int64_t>(B) );
+	REQUIRE( A.is_negative() == B.is_negative() );
+	REQUIRE( A.is_normal() == B.is_normal() );
+	REQUIRE( A.round_mode() == B.round_mode() );
+	REQUIRE( A.throw_on_err() == B.throw_on_err() );
+
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		auto a = dist(gen);
+		auto A = d(a);
+		auto B = A;
+	
+		REQUIRE( static_cast<int64_t>(A) == static_cast<int64_t>(B) );
+		REQUIRE( A.is_negative() == B.is_negative() );
+		REQUIRE( A.is_normal() == B.is_normal() );
+		REQUIRE( A.round_mode() == B.round_mode() );
+		REQUIRE( A.throw_on_err() == B.throw_on_err() );
+	}
+}
+
 TEMPLATE_TEST_CASE( "Integer conversions", "[conversions][integers]", 
 	unsigned char, unsigned short, unsigned int, unsigned long, unsigned long long,
 	char, short, int, long, long long) {
@@ -265,10 +343,17 @@ TEMPLATE_TEST_CASE( "Floating conversions", "[conversions][floating]", float, do
 	auto max = numeric_limits<TestType>::max();
 	auto dist = uniform_int_distribution<TestType>(min, max);
 
+	// either we can convert round-trip, or we must trigger an inexact exception
 	for (int i=0; i < LOOP_SIZE; ++i) {
-		TestType a = dist(gen);
-		auto A = d(to_string(a));
-		REQUIRE( static_cast<TestType>(A) == a );
+		try {
+			TestType a = dist(gen);
+			auto A = d(a);
+			A.throw_on(IDecimal::Error::Inexact);
+			auto b = static_cast<TestType>(A);
+			REQUIRE( a == b );
+		} catch (IDecimal::InexactException) {
+			continue;
+		}
 	}
 }
 
@@ -296,24 +381,6 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			REQUIRE(d("inf").str() == string("+Inf"));
 			REQUIRE(d("-inf").str() == string("-Inf"));
 		}
-
-		SECTION("c_str()") {
-			REQUIRE(strcmp(d("NaN").c_str(), "+NaN") == 0);
-			REQUIRE(strcmp(d("+NaN").c_str(), "+NaN") == 0);
-			REQUIRE(strcmp(d("-NaN").c_str(), "-NaN") == 0);
-			REQUIRE(strcmp(d("nan").c_str(), "+NaN") == 0);
-			REQUIRE(strcmp(d("-nan").c_str(), "-NaN") == 0);
-			REQUIRE(strcmp(d("SNaN").c_str(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("+SNaN").c_str(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("-SNaN").c_str(), "-SNaN") == 0);
-			REQUIRE(strcmp(d("snan").c_str(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("-snan").c_str(), "-SNaN") == 0);
-			REQUIRE(strcmp(d("Inf").c_str(), "+Inf") == 0);
-			REQUIRE(strcmp(d("+Inf").c_str(), "+Inf") == 0);
-			REQUIRE(strcmp(d("-Inf").c_str(), "-Inf") == 0);
-			REQUIRE(strcmp(d("inf").c_str(), "+Inf") == 0);
-			REQUIRE(strcmp(d("-inf").c_str(), "-Inf") == 0);
-		}
 	}
 
 	SECTION("Zero") {
@@ -323,13 +390,6 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			REQUIRE(d(-0).str() == "+0E+0");
 			REQUIRE(d("-00000").str() == "-0E+0");
 		}
-		
-		SECTION("c_str()") {
-			REQUIRE(strcmp(d(0).c_str(), "+0E+0") == 0);
-			REQUIRE(strcmp(d("00000").c_str(), "+0E+0") == 0);
-			REQUIRE(strcmp(d(-0).c_str(), "+0E+0") == 0);
-			REQUIRE(strcmp(d("-00000").c_str(), "-0E+0") == 0);
-		}
 	}
 	
 	SECTION("One") {
@@ -337,13 +397,9 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			REQUIRE(d(1).str() == "+1E+0");
 			REQUIRE(d(-1).str() == "-1E+0");
 		}
-		
-		SECTION("c_str()") {
-			REQUIRE(strcmp(d(1).c_str(), "+1E+0") == 0);
-			REQUIRE(strcmp(d(-1).c_str(), "-1E+0") == 0);
-		}
 	}
 
+/* TODO
 	SECTION("str() for integers") { 
 		for (int i=0; i < LOOP_SIZE; ++i) {
 			auto l = dist(gen);
@@ -365,6 +421,7 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			REQUIRE( to_string(c) == a );
 		}
 	}
+*/
 
 	SECTION("str() for rationals") { 
 		for (int i=0; i < LOOP_SIZE; ++i) {
@@ -380,17 +437,19 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			}
 			
 			auto B = d(A.str());
-			auto C = d(A.c_str());
 
 			// are std::string and decimal::str convertible?
 			REQUIRE( A == B );
 			REQUIRE( A.str() == B.str() );
-			REQUIRE( B.str() == C.str() );
-			REQUIRE( strcmp(A.c_str(), B.c_str()) == 0);
-			REQUIRE( strcmp(B.c_str(), C.c_str()) == 0);
 
 			// can we convert decimal::str to double?
-			REQUIRE( static_cast<double>(B) == std::stod(B.str()) ); 
+			try {
+				B.throw_on(IDecimal::Error::Inexact);
+				auto b = static_cast<double>(B);
+				REQUIRE( b == std::stod(B.str()) );
+			} catch (IDecimal::InexactException) {
+				continue;
+			}
 		}
 	}
 }
@@ -579,53 +638,25 @@ TEST_CASE( "Binary operators", "binary" ) {
 			auto a = d(2);
 			auto b = d(3);
 			REQUIRE( a + b == d(5) );
-
-			a += b;
-			REQUIRE( a == d(5) );
-
-			a = d(2);
-			a.add(b);
-			REQUIRE( a == d(5) );
 		}
 		
 		SECTION("Subtraction") {
 			auto a = d(2);
 			auto b = d(3);
 			REQUIRE( a - b == d(-1) );
-
-			a -= b;
-			REQUIRE( a == d(-1) );
-			
-			a = d(2);
-			a.subtract(b);
-			REQUIRE( a == d(-1) );
 		}
 
 		SECTION("Multiplication") {
 			auto a = d(2);
 			auto b = d(3);
 			REQUIRE( a * b == d(6) );
-
-			a *= b;
-			REQUIRE( a == d(6) );
-			
-			a = d(2);
-			a.multiply(b);
-			REQUIRE( a == d(6) );
 		}
 		
 		SECTION("Division") {
 			auto a = d(4);
 			auto b = d(2);
 			REQUIRE( a / b == d(2) );
-
-			a /= b;
-			REQUIRE( a == d(2) );
 			REQUIRE( d(1) / d(10) == d("0.1") );
-			
-			a = d(4);
-			a.divide(b);
-			REQUIRE( a == d(2) );
 		}
 	}
 	
@@ -648,13 +679,6 @@ TEST_CASE( "Binary operators", "binary" ) {
 				auto A = d(a);
 				auto B = d(b);
 				REQUIRE( (A + B) == d(a + b) );
-
-				A += B;
-				REQUIRE( A == d(a + b) );
-
-				A = d(a);
-				A.add(B);
-				REQUIRE( A == d(a + b) );
 			}
 		}
 			
@@ -671,13 +695,6 @@ TEST_CASE( "Binary operators", "binary" ) {
 				auto A = d(a);
 				auto B = d(b);
 				REQUIRE( (A - B) == d(a - b) );
-
-				A -= B;
-				REQUIRE( A == d(a - b) );
-
-				A = d(a);
-				A.subtract(B);
-				REQUIRE( A == d(a - b) );
 			}
 		}
 
@@ -694,13 +711,6 @@ TEST_CASE( "Binary operators", "binary" ) {
 				auto A = d(a);
 				auto B = d(b);
 				REQUIRE( A * B == d(a * b) );
-
-				A *= B;
-				REQUIRE( A == d(a * b) );
-				
-				A = d(a);
-				A.multiply(B);
-				REQUIRE( A == d(a * b) );
 			}
 		}
 		
@@ -717,13 +727,6 @@ TEST_CASE( "Binary operators", "binary" ) {
 				auto A = d(a);
 				auto B = d(b);
 				REQUIRE( truncate(A / B) == d(a / b) );
-
-				A /= B;
-				REQUIRE( truncate(A) == d(a / b) );
-				
-				A = d(a);
-				A.divide(B);
-				REQUIRE( truncate(A) == d(a / b) );
 			}
 		}
 	}
@@ -789,8 +792,6 @@ TEST_CASE( "Laws", "[laws]" ) {
 		}
 		
 		SECTION("Random") {
-			auto min = numeric_limits<int>::min();
-			auto max = numeric_limits<int>::max();
 			auto a = int_dist(gen);
 			auto b = int_dist(gen);
 			auto c = int_dist(gen);
@@ -832,19 +833,16 @@ TEST_CASE( "Exceptions: Invalid", "[invalid]" ) {
 TEST_CASE( "Exceptions: Divide by Zero", "[zerodivide]" ) {
 	auto one = longDecimal::One;
 	auto zero = longDecimal::Zero;
-
-	auto res = one / zero;
-	REQUIRE( res == longDecimal::Inf);
-	REQUIRE( res.errors() == d::Error::DivideByZero); 
-
-	one.throw_on(LongDecimal::Error::DivideByZero);
+	
 	REQUIRE_THROWS_AS( one / zero, LongDecimal::DivideByZeroException);
 	
 	one.throw_off(LongDecimal::Error::DivideByZero);
-	REQUIRE_NOTHROW( one / zero );
-
-	one.throw_on(LongDecimal::Error::Any);
 	REQUIRE_THROWS_AS( one / zero, LongDecimal::DivideByZeroException);
+	
+	zero.throw_off(LongDecimal::Error::DivideByZero);
+	auto res = one / zero;
+	REQUIRE( res == longDecimal::Inf);
+	REQUIRE( res.errors() == d::Error::DivideByZero); 
 }
 
 TEST_CASE( "Exceptions: Overflow / Underflow", "[overflow]" ) {
@@ -854,33 +852,26 @@ TEST_CASE( "Exceptions: Overflow / Underflow", "[overflow]" ) {
 	auto smallest = longDecimal::SmallestPositive;
 	
 	SECTION("Overflow") {
-		auto res = max + max;
-		REQUIRE( res.overflow() );
-		REQUIRE( res.errors() == (d::Error::Overflow | d::Error::Inexact) ); 
-
-		max.throw_on(LongDecimal::Error::Overflow);
 		REQUIRE_THROWS_AS( max + max, LongDecimal::OverflowException );
 		
 		max.throw_off(LongDecimal::Error::Overflow );
 		REQUIRE_NOTHROW( max + max );
 
-		max.throw_on(LongDecimal::Error::Any);
-		REQUIRE_THROWS_AS( max + max, LongDecimal::OverflowException );
+		auto res = max + max;
+		REQUIRE( res.overflow() );
+		REQUIRE( res.errors() == (d::Error::Overflow | d::Error::Inexact) ); 
 	}
 	
 	SECTION("Underflow") {
-		auto res = smallest / max;
-		REQUIRE( res.underflow() );
-		REQUIRE( res.errors() == (d::Error::Underflow | d::Error::Inexact) ); 
-
-		smallest.throw_on(LongDecimal::Error::Underflow);
 		REQUIRE_THROWS_AS( smallest / max, LongDecimal::UnderflowException );
 		
 		smallest.throw_off(LongDecimal::Error::Underflow);
+		max.throw_off(LongDecimal::Error::Underflow);
 		REQUIRE_NOTHROW( smallest / max );
 
-		smallest.throw_on(LongDecimal::Error::Any);
-		REQUIRE_THROWS_AS( smallest / max, LongDecimal::UnderflowException );
+		auto res = smallest / max;
+		REQUIRE( res.underflow() );
+		REQUIRE( res.errors() == (d::Error::Underflow | d::Error::Inexact) ); 
 	}
 }
 
@@ -909,6 +900,7 @@ TEST_CASE( "Rounding", "[rounding]" ) {
 		REQUIRE( a == d("10000000000000000000000000000000020") );
 		
 		a = d("-10000000000000000000000000000000025", LongDecimal::Round::NearestEven);
+		assert(a.is_negative());
 		REQUIRE( a == d("-10000000000000000000000000000000020") );
 	}
 	
@@ -938,22 +930,15 @@ TEST_CASE( "Rounding", "[rounding]" ) {
 	
 	SECTION( "Toward Zero" ) {	
 		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::TowardZero);
-		REQUIRE( a == d("10000000000000000000000000000000020") );
+		REQUIRE( a == d("10000000000000000000000000000000020"));
 		
 		a = d("-10000000000000000000000000000000025", LongDecimal::Round::TowardZero);
-		REQUIRE( a == d("-10000000000000000000000000000000020") );
+		REQUIRE( a == d("-10000000000000000000000000000000020"));
 	}
 
 	SECTION( "Mismatched throws by default" ) {
 		auto a = d("10000000000000000000000000000000025", LongDecimal::Round::NearestEven);
 		auto b = d("10000000000000000000000000000000015", LongDecimal::Round::NearestAway);
 		REQUIRE_THROWS_AS( a + b, LongDecimal::MismatchedRoundingException);
-	}
-
-	SECTION( "Mismatched error can be overcome by specifying a round mode with a function" ) {
-		auto a = d(5);
-		auto b = d(9);
-		a.divide(b, LongDecimal::Round::TowardZero);
-		REQUIRE( a == d("0.5555555555555555555555555555555555") );
 	}
 }
