@@ -161,10 +161,6 @@ protected:
 	// since different functions are needed 
 	// depending on the data type of T,
 	// we have to attach these when the object is constructed
-	std::function<D128(const uint32_t)> from_uint32;
-	std::function<D128(const uint64_t)> from_uint64;
-	std::function<D128(int32_t)> from_int32;
-	std::function<D128(int64_t)> from_int64;
 	std::function<void(char *, D128, ErrorFlags*)> to_string;
 	std::function<uint8_t(D128, ErrorFlags*)> to_uint8_xrnint;
 	std::function<uint16_t(D128, ErrorFlags*)> to_uint16_xrnint;
@@ -176,8 +172,6 @@ protected:
 	std::function<int64_t(D128, ErrorFlags*)> to_int64_xrnint;
 	std::function<float(D128, RoundMode, ErrorFlags*)> to_binary32;
 	std::function<double(D128, RoundMode, ErrorFlags*)> to_binary64;
-	std::function<D128(float, RoundMode, ErrorFlags*)> from_binary32;
-	std::function<D128(double, RoundMode, ErrorFlags*)> from_binary64;
 	std::function<int(D128)> _is_signed;
 	std::function<int(D128)> _is_normal;
 	std::function<int(D128)> _is_zero;
@@ -225,15 +219,6 @@ protected:
 	// helper method to invoke an operation
 	// this method does not save any flags
 	// (it does not modify the object)	
-	//void invoke(std::function<void(ErrorFlags*)> func) {
-		//ErrorFlags flags = Error::None;
-		//func(&flags);
-		//save_flags(flags);
-	//}
-
-	// helper method to invoke an operation
-	// this method does not save any flags
-	// (it does not modify the object)	
 	// this method returns the result of the operation
 	template <class TResult>
 	static TResult invoke(std::function<TResult(ErrorFlags*)> func, const ErrorFlags throw_on_err = Error::Undefined) {
@@ -243,17 +228,6 @@ protected:
 		return result;
 	}
 	
-	// helper method to invoke an operation
-	// this method saves any flags that the operation sets
-	// this method returns the result of the operation
-	//template <class TResult>
-	//TResult invoke(std::function<TResult(ErrorFlags*)> func) {
-		//ErrorFlags flags = Error::None;
-		//TResult result = func(&flags);
-		//this->save_flags(flags);
-		//return result;
-	//}
-
 	// encapsulates construction / destruction of a char*
 	struct cstr {
 		char* val;
@@ -314,7 +288,7 @@ protected:
 				const ErrorFlags throw_on_err = Error::Undefined)  
 		: _val(value), _round_mode(round_mode), _throw(throw_on_err) {
 			if ((throw_on_err & Error::Invalid) != Error::Invalid) {
-				throw Exception("Error::Invalid is required for all operations."); // TODO: Test
+				throw Exception("Error::Invalid is required for all operations.");
 			}
 		}
 	
@@ -507,12 +481,12 @@ public:
 			return this->to_binary32(this->_val, this->_round_mode, flags);
 		}, this->_throw);
 	}
-	
+
 	// == comparison operators == //
 	friend inline bool operator!=(const DecimalBase<T> & l, const DecimalBase<T> & r) { return !(l == r); }
 	friend inline bool operator==(const DecimalBase<T> & l, const DecimalBase<T> & r) { 
 		return (DecimalBase::invoke<int>([&](ErrorFlags * flags) {
-			return l.quiet_equal(l._val, r._val, flags); // TODO: QUIET?
+			return l.quiet_equal(l._val, r._val, flags);
 		}, l._throw | r._throw) > 0);
 	}
 
@@ -533,12 +507,7 @@ public:
 
 class LongDecimal final : public DecimalBase<D128> {
 private:
-	// TODO: Cull the unused ones (constructors use them directly, I believe)
 	void _attach_bid_functions() override {
-		this->from_uint32 = bid128_from_uint32;
-		this->from_uint64 = bid128_from_uint64;
-		this->from_int32 = bid128_from_int32;
-		this->from_int64 = bid128_from_int64;
 		this->to_string = bid128_to_string;
 		this->to_uint8_xrnint = bid128_to_uint8_xrnint;
 		this->to_uint16_xrnint = bid128_to_uint16_xrnint;
@@ -550,8 +519,6 @@ private:
 		this->to_int64_xrnint = bid128_to_int64_xrnint;
 		this->to_binary32 = bid128_to_binary32;
 		this->to_binary64 = bid128_to_binary64;
-		this->from_binary32 = binary32_to_bid128;
-		this->from_binary64 = binary64_to_bid128;
 		this->_is_signed = bid128_isSigned;
 		this->_is_normal = bid128_isNormal;
 		this->_is_zero = bid128_isZero;
@@ -686,13 +653,11 @@ public:
 				const ErrorFlags throw_on_err = Error::Undefined) 
 		: LongDecimal(static_cast<long long>(value), round_mode, throw_on_err) {}
 
-// TODO: test	
 	LongDecimal(const float value, 
 				const RoundMode round_mode = Round::NearestEven, 
 				const ErrorFlags throw_on_err = Error::Undefined) 
 		: LongDecimal(LongDecimal::from_float(value, round_mode, throw_on_err), round_mode, throw_on_err) {}
 	
-// TODO: test	
 	LongDecimal(const double value, 
 				const RoundMode round_mode = Round::NearestEven, 
 				const ErrorFlags throw_on_err = Error::Undefined) 
@@ -755,6 +720,7 @@ namespace longDecimal {
 	static LongDecimal SmallestPositive(std::string("9999999999999999999999999999999999") + "E-6176");
 	static LongDecimal SmallestNegative(std::string("-9999999999999999999999999999999999") + "E-6176");
 	static LongDecimal Inf("Inf");
+	static LongDecimal NaN("+NaN");
 }
 
 } // namespace decimal754

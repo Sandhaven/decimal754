@@ -86,26 +86,8 @@ static const vector<LongDecimal> B() {
 /*
 TEST_CASE("Temp", "[temp]") {
 	try {
-		std::mt19937_64 gen(rd());
-		auto min = numeric_limits<double>::min();
-		auto mx = numeric_limits<double>::max();
-		auto dist = uniform_int_distribution<double>(min, mx);
-
-		double epsilon = 0;
-		for (auto i=0; i < 10; i++) {
-			auto a = dist(gen);
-			auto A = static_cast<float>(d(a));
-			cout << a << endl;
-			cout << A << endl;
-			cout << "===" << endl;
-			continue;
-
-			//auto b = static_cast<double>(A);
-			//auto diff = abs(a - b);
-			//epsilon = max(epsilon, diff);
-		}
-			
-		cout << epsilon << endl;
+		auto a = d("+NaN");
+		cout << "Huh? " << a << endl;
 	} catch (...) {}
 	exit(0);
 }
@@ -120,6 +102,9 @@ TEST_CASE( "Constants", "[constants]" ) {
 		REQUIRE( longDecimal::SmallestPositive == d(std::string("9999999999999999999999999999999999") + "E-6176") );
 		REQUIRE( longDecimal::SmallestNegative == d(std::string("-9999999999999999999999999999999999") + "E-6176") );
 		REQUIRE( longDecimal::Inf == d("Inf") );
+
+		// NaN do not compare equal to each other
+		REQUIRE( longDecimal::NaN != d("+NaN") );
 	}
 
 	SECTION("Uniqueness") {
@@ -141,6 +126,12 @@ TEST_CASE( "Constants", "[constants]" ) {
 			}
 		}
 	}
+}
+
+TEST_CASE( "Errors", "[errors]" ) {
+	// Error::Invalid must be included
+	REQUIRE_THROWS_AS(d("1", IDecimal::Round::NearestEven, IDecimal::Error::None), IDecimal::Exception);
+	// TODO: Test more stuff
 }
 
 TEST_CASE( "Null constructor", "[null constructor]" ) {
@@ -192,7 +183,7 @@ TEMPLATE_TEST_CASE( "Constructors: Integers", "[constructors][integers]",
 	auto max = numeric_limits<TestType>::max();
 	auto dist = uniform_int_distribution<TestType>(min, max);
 
-	REQUIRE_NOTHROW(d(static_cast<TestType>('5')));
+	REQUIRE_NOTHROW(d(static_cast<TestType>(5)));
 
 	for (int i=0; i < LOOP_SIZE; ++i) {
 		auto a = dist(gen);
@@ -200,6 +191,50 @@ TEMPLATE_TEST_CASE( "Constructors: Integers", "[constructors][integers]",
 		REQUIRE( A.errors() == IDecimal::Error::None );
 		REQUIRE( static_cast<TestType>(A) == a);
 		REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
+
+		if (a == 0) {
+			REQUIRE( A.is_zero() );
+			REQUIRE( !A.is_normal() );
+		} else {
+			REQUIRE( !A.is_zero() );
+			REQUIRE( A.is_normal() );
+		}
+		
+		if (a >= 0) {
+			REQUIRE( !A.is_negative() );
+		} else {
+			REQUIRE( A.is_negative() );
+		}
+	
+		for (auto m = round_modes.begin(); m != round_modes.end(); ++m) {
+			auto b = d(a, *m);
+			REQUIRE( b.round_mode() == *m );
+		}
+	}
+}
+
+TEMPLATE_TEST_CASE( "Constructors: Floating point", "[constructors][float]", float, double ) {
+	std::mt19937_64 gen(rd());
+	auto min = numeric_limits<TestType>::min();
+	auto max = numeric_limits<TestType>::max();
+	auto dist = uniform_int_distribution<TestType>(min, max);
+
+	REQUIRE_NOTHROW(d(static_cast<TestType>(5.5)));
+
+	for (int i=0; i < LOOP_SIZE; ++i) {
+		auto a = dist(gen);
+		auto A = d(a);
+		REQUIRE( A.errors() == IDecimal::Error::None );
+		REQUIRE( A.round_mode() == IDecimal::Round::NearestEven );
+	
+		try {	
+			// conversion back to float must be exact or trigger an inexact exception
+			A.throw_on(IDecimal::Error::Inexact);
+			auto r = static_cast<TestType>(A);
+			REQUIRE( r == a);
+		} catch (IDecimal::InexactException) {
+			continue;
+		}
 
 		if (a == 0) {
 			REQUIRE( A.is_zero() );
@@ -230,6 +265,7 @@ TEST_CASE( "Constructors: strings", "[constructors][strings]" ) {
 	
 	SECTION("const char *") {
 		REQUIRE_NOTHROW(d("5"));
+		REQUIRE(!d("ABC").is_normal()); // this will be +NaN
 
 		for (int i=0; i < LOOP_SIZE; ++i) {
 			auto l = dist(gen);
