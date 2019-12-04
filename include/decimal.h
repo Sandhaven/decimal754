@@ -83,7 +83,7 @@ extern int __bid128_isSigned (D128 x);
 extern int __bid128_isNormal (D128 x);
 extern int __bid128_isZero (D128 x);
 extern int __bid128_quiet_equal (D128 x, D128 y, ErrorFlags *pfpsf);
-extern int __bid128_quiet_less (D128 x, D128 y, ErrorFlags *pfpsf); // TODO: SIGNALLING?
+extern int __bid128_quiet_less (D128 x, D128 y, ErrorFlags *pfpsf);
 
 /* 64-bit functions */ // TODO: Implement 64-bit C functions
 }
@@ -348,8 +348,6 @@ public:
 		return buf;
 	}
 	
-	// TODO: Inexact strings are ugly
-	// TODO: scientific notation
 	const std::string sci() {
 		auto buf = this->str().c_str();
 		auto len = strlen(buf);
@@ -372,7 +370,10 @@ public:
 			while (buf[end+1] != 'E') { --end; }
 			assert(end < len - 1);	// the exponent must exist
 			assert(end > 0);		// there must also be a sign and significand
-			assert(end >= start);	// the end cannot be before the start
+
+			if (end < start) {
+				return "0E+0";
+			}
 		
 			// compute the exponent	
 			auto exp = atoi(&buf[end+2]); // the value of the exponent
@@ -495,7 +496,7 @@ public:
 	friend inline bool operator>=(const DecimalBase<T> & l, const DecimalBase<T> & r) { return l > r || l == r; }
 	friend inline bool operator<(const DecimalBase<T> & l, const DecimalBase<T> & r) {
 		return (DecimalBase::invoke<int>([&](ErrorFlags * flags) {
-			return l.quiet_less(l._val, r._val, flags); // TODO: QUIET?
+			return l.quiet_less(l._val, r._val, flags);
 		}, l._throw | r._throw) > 0);
 	}
 		

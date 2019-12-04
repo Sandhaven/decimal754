@@ -131,7 +131,6 @@ TEST_CASE( "Constants", "[constants]" ) {
 TEST_CASE( "Errors", "[errors]" ) {
 	// Error::Invalid must be included
 	REQUIRE_THROWS_AS(d("1", IDecimal::Round::NearestEven, IDecimal::Error::None), IDecimal::Exception);
-	// TODO: Test more stuff
 }
 
 TEST_CASE( "Null constructor", "[null constructor]" ) {
@@ -435,7 +434,6 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 		}
 	}
 
-/* TODO
 	SECTION("str() for integers") { 
 		for (int i=0; i < LOOP_SIZE; ++i) {
 			auto l = dist(gen);
@@ -443,21 +441,16 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 			string a = to_string(l);
 			auto A = d(a);
 			auto B = d(A.str());
-			auto C = d(A.c_str());
 
 			// are std::string and decimal::str convertible?
 			REQUIRE( A == B );
 			REQUIRE( A.str() == B.str() );
-			REQUIRE( B.str() == C.str() );
-			REQUIRE( strcmp(A.c_str(), B.c_str()) == 0);
-			REQUIRE( strcmp(B.c_str(), C.c_str()) == 0);
 
 			// can we recover std::string from a decimal constructed from decimal::str?
 			auto c = static_cast<long long>(B);
 			REQUIRE( to_string(c) == a );
 		}
 	}
-*/
 
 	SECTION("str() for rationals") { 
 		for (int i=0; i < LOOP_SIZE; ++i) {
@@ -490,7 +483,6 @@ TEST_CASE("String Conversion", "[conversions][strings]") {
 	}
 }
 
-/*
 TEST_CASE("Scientific notation", "[conversions][sci]") {
 	std::mt19937_64 gen(rd());
 	auto min = numeric_limits<long long>::min();
@@ -498,69 +490,33 @@ TEST_CASE("Scientific notation", "[conversions][sci]") {
 	auto dist = uniform_int_distribution<long long>(min, max);
 	
 	SECTION("Special cases") {
-		SECTION("sci()") {
-			REQUIRE(d("NaN").sci() == string("+NaN"));
-			REQUIRE(d("+NaN").sci() == string("+NaN"));
-			REQUIRE(d("-NaN").sci() == string("-NaN"));
-			REQUIRE(d("nan").sci() == string("+NaN"));
-			REQUIRE(d("-nan").sci() == string("-NaN"));
-			REQUIRE(d("SNaN").sci() == string("+SNaN"));
-			REQUIRE(d("+SNaN").sci() == string("+SNaN"));
-			REQUIRE(d("-SNaN").sci() == string("-SNaN"));
-			REQUIRE(d("snan").sci() == string("+SNaN"));
-			REQUIRE(d("-snan").sci() == string("-SNaN"));
-			REQUIRE(d("Inf").sci() == string("+Inf"));
-			REQUIRE(d("+Inf").sci() == string("+Inf"));
-			REQUIRE(d("-Inf").sci() == string("-Inf"));
-			REQUIRE(d("inf").sci() == string("+Inf"));
-			REQUIRE(d("-inf").sci() == string("-Inf"));
-		}
-
-		SECTION("c_sci()") {
-			REQUIRE(strcmp(d("NaN").c_sci(), "+NaN") == 0);
-			REQUIRE(strcmp(d("+NaN").c_sci(), "+NaN") == 0);
-			REQUIRE(strcmp(d("-NaN").c_sci(), "-NaN") == 0);
-			REQUIRE(strcmp(d("nan").c_sci(), "+NaN") == 0);
-			REQUIRE(strcmp(d("-nan").c_sci(), "-NaN") == 0);
-			REQUIRE(strcmp(d("SNaN").c_sci(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("+SNaN").c_sci(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("-SNaN").c_sci(), "-SNaN") == 0);
-			REQUIRE(strcmp(d("snan").c_sci(), "+SNaN") == 0);
-			REQUIRE(strcmp(d("-snan").c_sci(), "-SNaN") == 0);
-			REQUIRE(strcmp(d("Inf").c_sci(), "+Inf") == 0);
-			REQUIRE(strcmp(d("+Inf").c_sci(), "+Inf") == 0);
-			REQUIRE(strcmp(d("-Inf").c_sci(), "-Inf") == 0);
-			REQUIRE(strcmp(d("inf").c_sci(), "+Inf") == 0);
-			REQUIRE(strcmp(d("-inf").c_sci(), "-Inf") == 0);
-		}
+		REQUIRE(d("NaN").sci() == string("+NaN"));
+		REQUIRE(d("+NaN").sci() == string("+NaN"));
+		REQUIRE(d("-NaN").sci() == string("-NaN"));
+		REQUIRE(d("nan").sci() == string("+NaN"));
+		REQUIRE(d("-nan").sci() == string("-NaN"));
+		REQUIRE(d("SNaN").sci() == string("+SNaN"));
+		REQUIRE(d("+SNaN").sci() == string("+SNaN"));
+		REQUIRE(d("-SNaN").sci() == string("-SNaN"));
+		REQUIRE(d("snan").sci() == string("+SNaN"));
+		REQUIRE(d("-snan").sci() == string("-SNaN"));
+		REQUIRE(d("Inf").sci() == string("+Inf"));
+		REQUIRE(d("+Inf").sci() == string("+Inf"));
+		REQUIRE(d("-Inf").sci() == string("-Inf"));
+		REQUIRE(d("inf").sci() == string("+Inf"));
+		REQUIRE(d("-inf").sci() == string("-Inf"));
 	}
 
 	SECTION("Zero") {
-		SECTION("sci()") {
-			REQUIRE(d(0).sci() == "0E+0");
-			REQUIRE(d("00000").sci() == "0E+0");
-			REQUIRE(d(-0).sci() == "0E+0");
-			REQUIRE(d("-00000").sci() == "0E+0");
-		}
-		
-		SECTION("c_sci()") {
-			REQUIRE(strcmp(d(0).c_sci(), "0E+0") == 0);
-			REQUIRE(strcmp(d("00000").c_sci(), "0E+0") == 0);
-			REQUIRE(strcmp(d(-0).c_sci(), "0E+0") == 0);
-			REQUIRE(strcmp(d("-00000").c_sci(), "0E+0") == 0);
-		}
+		REQUIRE(d(0).sci() == "0E+0");
+		REQUIRE(d("00000").sci() == "0E+0");
+		REQUIRE(d(-0).sci() == "0E+0");
+		REQUIRE(d("-00000").sci() == "0E+0");
 	}
 	
 	SECTION("One") {
-		SECTION("sci()") {
-			REQUIRE(d(1).sci() == "1E+0");
-			REQUIRE(d(-1).sci() == "-1E+0");
-		}
-		
-		SECTION("c_sci()") {
-			REQUIRE(strcmp(d(1).c_sci(), "1E+0") == 0);
-			REQUIRE(strcmp(d(-1).c_sci(), "-1E+0") == 0);
-		}
+		REQUIRE(d(1).sci() == "1E+0");
+		REQUIRE(d(-1).sci() == "-1E+0");
 	}
 
 	SECTION("sci() for integers") { 
@@ -570,14 +526,10 @@ TEST_CASE("Scientific notation", "[conversions][sci]") {
 			string a = to_string(l);
 			auto A = d(a);
 			auto B = d(A.sci());
-			auto C = d(A.c_sci());
 
 			// are std::string and decimal::sci convertible?
 			REQUIRE( A == B );
 			REQUIRE( A.sci() == B.sci() );
-			REQUIRE( B.sci() == C.sci() );
-			REQUIRE( strcmp(A.c_sci(), B.c_sci()) == 0);
-			REQUIRE( strcmp(B.c_sci(), C.c_sci()) == 0);
 
 			// can we recover std::string from a decimal constructed from decimal::sci?
 			auto c = static_cast<long long>(B);
@@ -599,21 +551,22 @@ TEST_CASE("Scientific notation", "[conversions][sci]") {
 			}
 			
 			auto B = d(A.sci());
-			auto C = d(A.c_sci());
 
 			// are std::string and decimal::str convertible?
 			REQUIRE( A == B );
 			REQUIRE( A.sci() == B.sci() );
-			REQUIRE( B.sci() == C.sci() );
-			REQUIRE( strcmp(A.c_sci(), B.c_sci()) == 0);
-			REQUIRE( strcmp(B.c_sci(), C.c_sci()) == 0);
 
 			// can we convert decimal::str to double?
-			REQUIRE( static_cast<double>(B) == std::stod(B.sci()) ); 
+			try {
+				B.throw_on(IDecimal::Error::Inexact);
+				auto b = static_cast<double>(B);
+				REQUIRE( b == std::stod(B.sci()) );
+			} catch (IDecimal::InexactException) {
+				continue;
+			}
 		}
 	}
 }
-*/
 
 TEST_CASE( "Random Decimals", "[random]" ) {
 	auto a = A();
